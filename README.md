@@ -25,7 +25,7 @@ Built for the **AI Revenue Recovery** hackathon track.
 | `docs/PRD.md` | Living product requirements document and source of truth |
 | `backend/app/models/` | SQLAlchemy models and domain enums |
 | `backend/app/risk/` | Deterministic risk-engine contract and rules |
-| `backend/app/agents/` | Strict decisions, scoped tools, Claude and rules providers |
+| `backend/app/agents/` | Strict decisions, scoped tools, Claude, Grok, and rules providers |
 | `backend/app/workflow/` | Policy guard and bounded recovery orchestration |
 | `backend/app/services/` | Agent, payment, action, audit, and formatting services |
 | `backend/app/api/routes.py` | Thin REST endpoints |
@@ -54,7 +54,7 @@ These versions were verified on Windows 11:
 - **Frontend** — Next.js, React, TypeScript, Tailwind CSS, Recharts (next phase)
 - **Backend** — Python, FastAPI, SQLAlchemy, Alembic
 - **Database** — PostgreSQL, with a zero-infrastructure SQLite fallback
-- **AI** — Claude (`claude-opus-5`) behind a provider interface, with deterministic rules fallback
+- **AI** — Grok (`grok-4.6`) or Claude (`claude-opus-5`) behind one provider interface, with deterministic rules fallback
 
 ---
 
@@ -70,8 +70,12 @@ Then edit `.env`:
 
 - `DATABASE_URL` points at Docker PostgreSQL by default. Select the included
   SQLite URL to run without infrastructure.
-- `AI_PROVIDER=anthropic` uses Claude when `ANTHROPIC_API_KEY` is set.
-- Missing Anthropic keys and transient provider outages visibly fall back to the
+- For Grok, set `AI_PROVIDER=xai` (the `grok` alias also works) and place a
+  newly rotated key in `XAI_API_KEY`. The default model is `grok-4.6`.
+- For Claude, set `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`; its default
+  model is `claude-opus-5`.
+- `AGENT_MODEL` is optional and overrides the selected provider's default.
+- Missing keys and transient provider outages visibly fall back to the
   deterministic `rules` provider. Set `AI_PROVIDER=rules` to force offline mode.
 - Malformed provider decisions are rejected and audited; they do not fall back
   or get coerced into valid decisions.
@@ -126,7 +130,7 @@ python -m pytest -v
 ```
 
 41 tests cover seeding, payment simulation, deterministic risk, strict agent
-outputs, bounded Claude tool calls, provider fallback, read-tool scoping,
+outputs, bounded live-provider tool calls, provider fallback, read-tool scoping,
 concurrent decision idempotency, recommendation execution, policy blocks,
 contact cooldown, durable scheduling, retry verification, audit safety, and
 recovered-revenue accounting. They use temporary SQLite and need no API key.

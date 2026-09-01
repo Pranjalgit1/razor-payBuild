@@ -180,9 +180,11 @@ The MVP must work fully without the ML model.
 
 ### Provider
 
-Claude API (`claude-opus-5`) via the official `anthropic` Python SDK, behind a
-provider interface so it can be swapped. A deterministic `rules` provider is
-included as a fallback so the entire demo runs without an API key.
+Claude (`claude-opus-5`) via the official `anthropic` SDK and Grok
+(`grok-4.6`) via xAI's OpenAI-compatible API are available behind the same
+provider interface. Both use strict, bounded structured tool calling. A
+deterministic `rules` provider remains the visible fallback so the complete
+demo works without an API key or during transient provider outages.
 
 ### Decision contract
 
@@ -494,10 +496,10 @@ policy or directly mutate money, transactions, messages, or cases.
 |---|---|
 | Risk engine | Pure `RiskEngine` contract and deterministic seven-factor implementation |
 | Explainability | Integer 0–100 score, exact risk bands, itemised factors that sum to the score |
-| Agent providers | Swappable Anthropic and deterministic rules providers; missing keys/outages visibly fall back |
+| Agent providers | Swappable Anthropic, xAI/Grok, and deterministic rules providers; missing keys/transient outages visibly fall back |
 | Structured output | Strict diagnosis, 0–1 confidence, controlled action, public reason, and escalation flag; malformed scalar types/extra fields are rejected |
 | Investigation tools | Four case-scoped read-only tools with bounded, strict inputs and no customer contact details |
-| Anthropic loop | `claude-opus-5`, strict tools, exactly one final submission, bounded turns/calls, no direct side effects |
+| Live-provider loops | `claude-opus-5` or `grok-4.6`, strict tools, exactly one final submission, bounded turns/calls, no direct side effects |
 | Agent API | `POST /api/recovery-cases/{id}/run-agent` persists DIAGNOSED and DECIDED steps idempotently |
 | Public explanations | Backend-owned templates replace provider prose before API response or persistence |
 | Concurrency | Compare-and-set claim, row locking where supported, and SQLite contention retry produce one decision/audit sequence |
@@ -547,7 +549,7 @@ The project is complete only when this scenario works end to end:
 | D5 | Read-only tools exposed to the AI; write actions executed by the backend | Implements the "AI proposes, backend disposes" boundary that makes the workflow bounded |
 | D6 | `rules` provider as an AI fallback | The demo must never fail because of a missing API key or network outage |
 | D7 | Risk engine is deterministic and labelled rule-based | The PRD explicitly forbids presenting rule-based scoring as AI |
-| D8 | Model `claude-opus-5` | Current-generation default; structured outputs + tool calling |
+| D8 | Provider defaults: `claude-opus-5` and `grok-4.6` | Current structured-output and tool-calling defaults, with `AGENT_MODEL` available as an override |
 | D9 | Enums stored as `VARCHAR`, not native DB enum types | Keeps the schema portable between PostgreSQL and SQLite, and avoids a migration every time a value is added |
 | D10 | Custom `UTCDateTime` column type | SQLite discards `tzinfo`, so timestamps would be naive there and aware on PostgreSQL. This normalises both directions |
 | D11 | Seed loads history only — never open cases | Every case a judge sees is genuinely produced by the workflow rather than inserted by the seeder |
@@ -560,7 +562,7 @@ The project is complete only when this scenario works end to end:
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Is an `ANTHROPIC_API_KEY` available for the demo, or should it run on the `rules` provider? | Resolved — both paths work; missing key/outage falls back visibly to rules |
+| Q1 | Is an `ANTHROPIC_API_KEY` or `XAI_API_KEY` available for the demo, or should it run on `rules`? | Resolved — all paths work; missing key/transient outage falls back visibly to rules |
 | Q2 | Should Docker/Postgres be required for the demo, or is the SQLite path preferred for judging? | Open — both supported |
 | Q3 | Which Kaggle dataset (if any) will be used for historical analytics? | Open — mapping layer makes this deferrable |
 

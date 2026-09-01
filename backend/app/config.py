@@ -25,7 +25,12 @@ class Settings(BaseSettings):
     # --- AI provider -------------------------------------------------------
     ai_provider: str = "anthropic"
     anthropic_api_key: str | None = None
-    agent_model: str = "claude-opus-5"
+    xai_api_key: str | None = None
+    # AGENT_MODEL is an optional provider-agnostic override. When omitted,
+    # each provider uses its own current default.
+    agent_model: str | None = None
+    anthropic_model: str = "claude-opus-5"
+    xai_model: str = "grok-4.6"
     agent_timeout_seconds: float = Field(default=30, gt=0, le=120)
     agent_max_tool_turns: int = Field(default=6, ge=1, le=10)
     agent_max_tool_calls: int = Field(default=8, ge=1, le=20)

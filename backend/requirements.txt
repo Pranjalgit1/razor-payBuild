@@ -14,8 +14,9 @@ pydantic[email]==2.13.5
 pydantic-settings==2.15.0
 python-dotenv==1.2.3
 
-# AI provider (Claude API - structured outputs + tool calling)
+# AI providers (structured outputs + tool calling)
 anthropic==1.2.0
+openai==2.41.1                 # OpenAI-compatible xAI/Grok client
 
 # Testing
 pytest==9.1.1
