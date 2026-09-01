@@ -1,0 +1,50 @@
+"""Application configuration, loaded from environment variables."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Database -----------------------------------------------------------
+    # PostgreSQL is the target database. The SQLite default exists so the demo
+    # runs with zero infrastructure; point DATABASE_URL at Postgres for any
+    # real deployment (see docker-compose.yml).
+    database_url: str = "sqlite+pysqlite:///./revenuerecover.db"
+    sql_echo: bool = False
+
+    # --- AI provider (wired up in Phase 4) ----------------------------------
+    ai_provider: str = "anthropic"
+    anthropic_api_key: str | None = None
+    agent_model: str = "claude-opus-5"
+
+    # --- Recovery policy limits (enforced by the backend, not the AI) -------
+    max_payment_retries: int = 2
+    max_reminders: int = 3
+    contact_cooldown_hours: int = 24
+    escalation_amount_threshold: int = 5_000_000  # paise (INR 50,000)
+    high_value_ltv_threshold: int = 5_000_000  # paise (INR 50,000)
+
+    # --- App ----------------------------------------------------------------
+    app_name: str = "RevenueRecover AI"
+    cors_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
