@@ -456,8 +456,8 @@ Build in incremental *working* stages — no placeholder screens.
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | Prerequisites verified, env/infra config committed | ✅ Complete |
-| 1 | Database schema + models + seed data | ⬜ Not started |
-| 2 | Payment simulation + recovery case creation | ⬜ Not started |
+| 1 | Database schema + models + seed data | ✅ Complete |
+| 2 | Payment simulation + recovery case creation | ✅ Complete |
 | 3 | Risk engine | ⬜ Not started |
 | 4 | AI recovery agent (structured decisions) | ⬜ Not started |
 | 5 | Policy guard + recovery action execution | ⬜ Not started |
@@ -469,19 +469,42 @@ Build in incremental *working* stages — no placeholder screens.
 
 ---
 
+### Phase 1 + 2 — delivered
+
+Backend, schema, seed data, payment simulation and automatic case creation are
+built and tested. 16 API tests pass, and the flow was additionally verified
+against a live Uvicorn server.
+
+| Area | What exists |
+|---|---|
+| Schema | 5 tables via Alembic migration `213bb5ec98a1`; verified rendering valid PostgreSQL DDL and applying on SQLite |
+| Models | `Customer`, `Transaction`, `RecoveryCase`, `AgentAction`, `Message` |
+| Seed | 8 demo customers across value tiers, 48 historical transactions with a realistic failure rate |
+| Simulation | `POST /api/payments/simulate` — success or failure, any reason, any amount |
+| Detection | A failed payment automatically opens a case and writes the first audit entry |
+| Classification | Failure reason + customer type routes to the correct one of the four scenarios |
+| API | 12 endpoints; case list filterable by status, risk, type, customer, amount and date |
+
+Deliberately left unset until their own phases, rather than faked: `risk_score`
+and `risk_level` (Phase 3), and `diagnosis`, `confidence`, `recommended_action`
+(Phase 4). The columns and the counter fields that the policy guard will
+enforce (`retry_count`, `reminder_count`, `last_contact_at`) already exist.
+
+---
+
 ## 17. Acceptance Criteria
 
 The project is complete only when this scenario works end to end:
 
-- [ ] 1. A payment failure is generated
-- [ ] 2. A recovery case is automatically created
-- [ ] 3. Revenue-at-risk is calculated
+- [x] 1. A payment failure is generated
+- [x] 2. A recovery case is automatically created
+- [x] 3. Revenue-at-risk is calculated
 - [ ] 4. Risk score is displayed
 - [ ] 5. AI diagnoses the failure
 - [ ] 6. AI chooses an intervention
 - [ ] 7. Backend validates the intervention against safety limits
 - [ ] 8. The action is executed
-- [ ] 9. Audit trail is created
+- [x] 9. Audit trail is created (detection entry; later phases append to it)
 - [ ] 10. Customer payment can be simulated
 - [ ] 11. Case changes to RECOVERED
 - [ ] 12. Recovered revenue increases
@@ -503,6 +526,11 @@ The project is complete only when this scenario works end to end:
 | D6 | `rules` provider as an AI fallback | The demo must never fail because of a missing API key or network outage |
 | D7 | Risk engine is deterministic and labelled rule-based | The PRD explicitly forbids presenting rule-based scoring as AI |
 | D8 | Model `claude-opus-5` | Current-generation default; structured outputs + tool calling |
+| D9 | Enums stored as `VARCHAR`, not native DB enum types | Keeps the schema portable between PostgreSQL and SQLite, and avoids a migration every time a value is added |
+| D10 | Custom `UTCDateTime` column type | SQLite discards `tzinfo`, so timestamps would be naive there and aware on PostgreSQL. This normalises both directions |
+| D11 | Seed loads history only — never open cases | Every case a judge sees is genuinely produced by the workflow rather than inserted by the seeder |
+| D12 | `recovery_cases.transaction_id` is UNIQUE | Makes detection idempotent: re-simulating the same transaction cannot open a duplicate case |
+| D13 | Responses carry pre-formatted `*_formatted` currency strings | Indian lakh/crore grouping (₹4,82,500) is implemented once on the backend instead of being reimplemented in TypeScript |
 
 ---
 

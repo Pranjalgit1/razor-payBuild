@@ -1,4 +1,4 @@
-# RevenueRecover AI — backend dependencies
+# RevenueRecover AI - backend dependencies
 # Pinned to versions verified working on Python 3.14 (Windows).
 
 fastapi==0.141.1
@@ -10,9 +10,13 @@ alembic==1.19.1
 psycopg[binary]==3.3.5          # PostgreSQL driver
 
 # Config / validation
-pydantic==2.13.5
+pydantic[email]==2.13.5
 pydantic-settings==2.15.0
 python-dotenv==1.2.3
 
-# AI provider (Claude API — structured outputs + tool calling)
+# AI provider (Claude API - structured outputs + tool calling)
 anthropic==1.2.0
+
+# Testing
+pytest==9.1.1
+httpx==0.28.1                   # required by fastapi.testclient
