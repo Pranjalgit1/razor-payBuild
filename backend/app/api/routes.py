@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database.session import get_db
 from app.models.entities import AgentAction, Customer, RecoveryCase, Transaction
-from app.models.enums import CaseStatus, CaseType, RiskLevel, TransactionStatus
+from app.models.enums import (
+    CaseStatus,
+    CaseType,
+    RecoveryAction,
+    RiskLevel,
+    TransactionStatus,
+)
 from app.schemas.schemas import (
     AgentActionRead,
     CustomerCreate,
@@ -31,9 +37,10 @@ from app.schemas.schemas import (
     RecoveryCaseRead,
     RecoveryPaymentRequest,
     RecoveryPaymentResponse,
+    RunAgentResponse,
     TransactionRead,
 )
-from app.services import case_service, payment_service, risk_service
+from app.services import agent_service, case_service, payment_service, risk_service
 from app.simulations.seed import reset_demo_data, seed_demo_data
 from app.workflow import RecoveryWorkflowError, record_customer_payment, run_action
 
@@ -215,22 +222,139 @@ def _get_case_for_workflow(db: Session, case_id: int) -> RecoveryCase:
     return case
 
 
+@cases_router.post("/{case_id}/run-agent", response_model=RunAgentResponse)
+def run_recovery_agent(
+    case_id: int,
+    db: Session = Depends(get_db),
+) -> RunAgentResponse:
+    """Run the structured decision layer without executing its proposal."""
+    case = (
+        db.query(RecoveryCase)
+        .options(
+            selectinload(RecoveryCase.customer),
+            selectinload(RecoveryCase.transaction),
+            selectinload(RecoveryCase.actions),
+        )
+        .filter(RecoveryCase.id == case_id)
+        .one_or_none()
+    )
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recovery case not found")
+    try:
+        result = agent_service.run_agent(db, case)
+    except agent_service.AgentWorkflowError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except agent_service.AgentDecisionRejected as exc:
+        # The rejection audit is safe to commit; no decision fields were applied.
+        db.commit()
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Agent decision failed structured validation.",
+        ) from exc
+    db.commit()
+
+    return RunAgentResponse(
+        case=RecoveryCaseRead.model_validate(result.case),
+        decision=result.decision,
+        metadata={
+            "provider": result.metadata.provider,
+            "configured_provider": result.metadata.configured_provider,
+            "model": result.metadata.model,
+            "request_id": result.metadata.request_id,
+            "fallback_reason": result.metadata.fallback_reason,
+            "tool_calls": list(result.metadata.tool_calls),
+        },
+        audit_actions=[AgentActionRead.model_validate(a) for a in result.audit_actions],
+        idempotent=result.idempotent,
+        message=(
+            "Existing validated agent decision returned."
+            if result.idempotent
+            else "Agent diagnosis and controlled action proposal recorded."
+        ),
+    )
+
+
 @cases_router.post("/{case_id}/execute", response_model=RecoveryActionResponse)
 def execute_recovery_action(
     case_id: int,
     payload: RecoveryActionRequest,
     db: Session = Depends(get_db),
 ) -> RecoveryActionResponse:
-    """Run an action only after the authoritative backend policy approves it."""
+    """Execute an agent recommendation or an explicit operator action."""
     case = _get_case_for_workflow(db, case_id)
-    result = run_action(db, case, payload.action)
+    recommended = (
+        RecoveryAction(case.recommended_action)
+        if case.recommended_action is not None
+        else None
+    )
+    scheduled_transition = (
+        recommended == RecoveryAction.SCHEDULE_RETRY
+        and case.action_taken == RecoveryAction.SCHEDULE_RETRY
+        and case.scheduled_retry_at is not None
+    )
+    if payload.action is None:
+        if recommended is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Run the recovery agent or provide an explicit operator action.",
+            )
+        if scheduled_transition:
+            selected_action = RecoveryAction.RETRY_PAYMENT
+            action_source = "scheduled_agent_transition"
+        else:
+            selected_action = recommended
+            action_source = "agent_recommendation"
+    else:
+        selected_action = payload.action
+        is_due_retry_transition = (
+            scheduled_transition and selected_action == RecoveryAction.RETRY_PAYMENT
+        )
+        if (
+            recommended is not None
+            and selected_action != recommended
+            and selected_action != RecoveryAction.ESCALATE_TO_HUMAN
+            and not is_due_retry_transition
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "The requested action does not match the validated agent recommendation.",
+            )
+        action_source = (
+            "scheduled_agent_transition"
+            if is_due_retry_transition
+            else "agent_recommendation"
+            if selected_action == recommended
+            else "manual_operator"
+        )
+
+    pending_retry = (
+        db.query(Transaction.id)
+        .filter(
+            Transaction.parent_transaction_id == case.transaction_id,
+            Transaction.status == TransactionStatus.PENDING,
+        )
+        .first()
+    )
+    if pending_retry is not None and selected_action != RecoveryAction.ESCALATE_TO_HUMAN:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A payment retry is already pending verification for this case.",
+        )
+
+    result = run_action(
+        db,
+        case,
+        selected_action,
+        action_source=action_source,
+    )
     db.commit()
 
     details = result.execution.details if result.execution is not None else {}
     if result.executed:
-        message = f"Recovery action {payload.action.value} executed."
+        message = f"Recovery action {selected_action.value} executed."
     elif result.decision.allowed:
-        message = f"Recovery action {payload.action.value} failed during execution."
+        message = f"Recovery action {selected_action.value} failed during execution."
     elif result.decision.escalation_required:
         message = "Action blocked by policy; case escalated for human review."
     else:

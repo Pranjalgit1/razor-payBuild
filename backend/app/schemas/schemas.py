@@ -12,6 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
+from app.agents.schemas import AgentDecision, Diagnosis
 from app.models.enums import (
     ActionStatus,
     CaseStatus,
@@ -170,8 +171,8 @@ class RecoveryCaseRead(ORMModel):
     risk_level: RiskLevel | None = None
     risk_factors: list[RiskFactor] | None = None
 
-    diagnosis: str | None = None
-    confidence: float | None = None
+    diagnosis: Diagnosis | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
     recommended_action: RecoveryAction | None = None
     decision_reason: str | None = None
     escalation_required: bool = False
@@ -214,10 +215,28 @@ class RecoveryCaseDetail(RecoveryCaseRead):
     messages: list[MessageRead] = Field(default_factory=list)
 
 
-class RecoveryActionRequest(BaseModel):
-    """A proposed controlled action; the backend policy remains authoritative."""
+class AgentRunMetadataRead(BaseModel):
+    provider: str
+    configured_provider: str
+    model: str | None = None
+    request_id: str | None = None
+    fallback_reason: str | None = None
+    tool_calls: list[str] = Field(default_factory=list)
 
-    action: RecoveryAction
+
+class RunAgentResponse(BaseModel):
+    case: RecoveryCaseRead
+    decision: AgentDecision
+    metadata: AgentRunMetadataRead
+    audit_actions: list[AgentActionRead] = Field(default_factory=list)
+    idempotent: bool = False
+    message: str
+
+
+class RecoveryActionRequest(BaseModel):
+    """Optional operator action; omitted means execute the agent recommendation."""
+
+    action: RecoveryAction | None = None
 
 
 class PolicyDecisionRead(BaseModel):

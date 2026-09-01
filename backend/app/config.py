@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,10 +22,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///./revenuerecover.db"
     sql_echo: bool = False
 
-    # --- AI provider (wired up in Phase 4) ----------------------------------
+    # --- AI provider -------------------------------------------------------
     ai_provider: str = "anthropic"
     anthropic_api_key: str | None = None
     agent_model: str = "claude-opus-5"
+    agent_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    agent_max_tool_turns: int = Field(default=6, ge=1, le=10)
+    agent_max_tool_calls: int = Field(default=8, ge=1, le=20)
 
     # --- Recovery policy limits (enforced by the backend, not the AI) -------
     max_payment_retries: int = 2
