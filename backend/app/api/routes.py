@@ -24,13 +24,18 @@ from app.schemas.schemas import (
     Page,
     PaymentSimulationRequest,
     PaymentSimulationResponse,
+    RecoveryActionRequest,
+    RecoveryActionResponse,
     RecoveryCaseDetail,
     RecoveryCaseListItem,
     RecoveryCaseRead,
+    RecoveryPaymentRequest,
+    RecoveryPaymentResponse,
     TransactionRead,
 )
-from app.services import case_service, payment_service
+from app.services import case_service, payment_service, risk_service
 from app.simulations.seed import reset_demo_data, seed_demo_data
+from app.workflow import RecoveryWorkflowError, record_customer_payment, run_action
 
 router = APIRouter(prefix="/api")
 
@@ -166,6 +171,8 @@ def simulate_payment(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     case = case_service.detect_revenue_at_risk(db, transaction)
+    if case is not None:
+        risk_service.score_case(db, case)
     db.commit()
 
     if case is None:
@@ -188,6 +195,97 @@ def simulate_payment(
 # ---------------------------------------------------------------------------
 
 cases_router = APIRouter(prefix="/recovery-cases", tags=["recovery-cases"])
+
+
+def _get_case_for_workflow(db: Session, case_id: int) -> RecoveryCase:
+    """Load one case and lock it where the database supports row locks."""
+    case = (
+        db.query(RecoveryCase)
+        .options(
+            selectinload(RecoveryCase.customer),
+            selectinload(RecoveryCase.transaction),
+            selectinload(RecoveryCase.actions),
+        )
+        .filter(RecoveryCase.id == case_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Recovery case not found")
+    return case
+
+
+@cases_router.post("/{case_id}/execute", response_model=RecoveryActionResponse)
+def execute_recovery_action(
+    case_id: int,
+    payload: RecoveryActionRequest,
+    db: Session = Depends(get_db),
+) -> RecoveryActionResponse:
+    """Run an action only after the authoritative backend policy approves it."""
+    case = _get_case_for_workflow(db, case_id)
+    result = run_action(db, case, payload.action)
+    db.commit()
+
+    details = result.execution.details if result.execution is not None else {}
+    if result.executed:
+        message = f"Recovery action {payload.action.value} executed."
+    elif result.decision.allowed:
+        message = f"Recovery action {payload.action.value} failed during execution."
+    elif result.decision.escalation_required:
+        message = "Action blocked by policy; case escalated for human review."
+    else:
+        message = "Action blocked by backend recovery policy."
+
+    return RecoveryActionResponse(
+        case=RecoveryCaseRead.model_validate(case),
+        policy={
+            "allowed": result.decision.allowed,
+            "code": result.decision.code,
+            "reason": result.decision.reason,
+            "escalation_required": result.decision.escalation_required,
+        },
+        executed=result.executed,
+        audit_action=AgentActionRead.model_validate(result.audit_action),
+        details=details,
+        message=message,
+    )
+
+
+@cases_router.post(
+    "/{case_id}/simulate-payment",
+    response_model=RecoveryPaymentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def simulate_recovery_payment(
+    case_id: int,
+    payload: RecoveryPaymentRequest,
+    db: Session = Depends(get_db),
+) -> RecoveryPaymentResponse:
+    """Simulate and verify the customer's payment after an approved action."""
+    case = _get_case_for_workflow(db, case_id)
+    try:
+        transaction = record_customer_payment(
+            db,
+            case,
+            amount=payload.amount,
+            succeed=payload.succeed,
+            failure_reason=payload.resolved_failure_reason(),
+        )
+    except RecoveryWorkflowError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    db.commit()
+
+    message = (
+        "Customer payment verified; the case is recovered."
+        if case.status == CaseStatus.RECOVERED
+        else "Customer payment recorded; recovery remains in progress."
+    )
+    return RecoveryPaymentResponse(
+        case=RecoveryCaseRead.model_validate(case),
+        transaction=TransactionRead.model_validate(transaction),
+        message=message,
+    )
 
 
 @cases_router.get("", response_model=Page[RecoveryCaseListItem])
