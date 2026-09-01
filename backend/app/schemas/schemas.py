@@ -166,7 +166,7 @@ class RecoveryCaseRead(ORMModel):
     case_type: CaseType
     status: CaseStatus
 
-    risk_score: int | None = None
+    risk_score: int | None = Field(default=None, ge=0, le=100)
     risk_level: RiskLevel | None = None
     risk_factors: list[RiskFactor] | None = None
 
@@ -183,6 +183,7 @@ class RecoveryCaseRead(ORMModel):
     retry_count: int
     reminder_count: int
     last_contact_at: datetime | None = None
+    scheduled_retry_at: datetime | None = None
 
     created_at: datetime
     resolved_at: datetime | None = None
@@ -209,8 +210,49 @@ class RecoveryCaseDetail(RecoveryCaseRead):
 
     customer: CustomerRead
     transaction: TransactionRead
-    actions: list[AgentActionRead] = []
-    messages: list[MessageRead] = []
+    actions: list[AgentActionRead] = Field(default_factory=list)
+    messages: list[MessageRead] = Field(default_factory=list)
+
+
+class RecoveryActionRequest(BaseModel):
+    """A proposed controlled action; the backend policy remains authoritative."""
+
+    action: RecoveryAction
+
+
+class PolicyDecisionRead(BaseModel):
+    allowed: bool
+    code: str
+    reason: str
+    escalation_required: bool = False
+
+
+class RecoveryActionResponse(BaseModel):
+    case: RecoveryCaseRead
+    policy: PolicyDecisionRead
+    executed: bool
+    audit_action: AgentActionRead
+    details: dict = Field(default_factory=dict)
+    message: str
+
+
+class RecoveryPaymentRequest(BaseModel):
+    """Simulate the customer's response after a recovery action."""
+
+    amount: int | None = Field(default=None, gt=0, description="Paise; defaults to remaining amount")
+    succeed: bool = True
+    failure_reason: FailureReason | None = FailureReason.EXPIRED_CARD
+
+    def resolved_failure_reason(self) -> FailureReason | None:
+        if self.succeed:
+            return None
+        return self.failure_reason or FailureReason.EXPIRED_CARD
+
+
+class RecoveryPaymentResponse(BaseModel):
+    case: RecoveryCaseRead
+    transaction: TransactionRead
+    message: str
 
 
 # ---------------------------------------------------------------------------

@@ -458,10 +458,10 @@ Build in incremental *working* stages — no placeholder screens.
 | 0 | Prerequisites verified, env/infra config committed | ✅ Complete |
 | 1 | Database schema + models + seed data | ✅ Complete |
 | 2 | Payment simulation + recovery case creation | ✅ Complete |
-| 3 | Risk engine | ⬜ Not started |
+| 3 | Deterministic risk engine | ✅ Complete |
 | 4 | AI recovery agent (structured decisions) | ⬜ Not started |
-| 5 | Policy guard + recovery action execution | ⬜ Not started |
-| 6 | REST API surface | ⬜ Not started |
+| 5 | Policy guard + recovery action execution | ✅ Complete |
+| 6 | Remaining REST API surface | 🟡 Partial |
 | 7 | Dashboard + cases + case detail | ⬜ Not started |
 | 8 | Analytics + agent activity | ⬜ Not started |
 | 9 | Historical CSV ingestion | ⬜ Not started |
@@ -471,24 +471,40 @@ Build in incremental *working* stages — no placeholder screens.
 
 ### Phase 1 + 2 — delivered
 
-Backend, schema, seed data, payment simulation and automatic case creation are
-built and tested. 16 API tests pass, and the flow was additionally verified
-against a live Uvicorn server.
+The schema, seed data, payment simulator, and automatic case creation are
+implemented. A failed payment opens one recovery case and writes the first audit
+entry in the same database transaction; a successful payment opens none.
 
 | Area | What exists |
 |---|---|
-| Schema | 5 tables via Alembic migration `213bb5ec98a1`; verified rendering valid PostgreSQL DDL and applying on SQLite |
+| Schema | 5 core tables via Alembic migration `213bb5ec98a1` |
 | Models | `Customer`, `Transaction`, `RecoveryCase`, `AgentAction`, `Message` |
-| Seed | 8 demo customers across value tiers, 48 historical transactions with a realistic failure rate |
-| Simulation | `POST /api/payments/simulate` — success or failure, any reason, any amount |
-| Detection | A failed payment automatically opens a case and writes the first audit entry |
-| Classification | Failure reason + customer type routes to the correct one of the four scenarios |
-| API | 12 endpoints; case list filterable by status, risk, type, customer, amount and date |
+| Seed | 8 demo customers and 48 correctly marked historical transactions |
+| Simulation | `POST /api/payments/simulate` for successful or failed events |
+| Detection | Failed payments calculate revenue at risk and open one idempotent case |
+| Classification | Failure reason + customer type select one of four scenarios |
 
-Deliberately left unset until their own phases, rather than faked: `risk_score`
-and `risk_level` (Phase 3), and `diagnosis`, `confidence`, `recommended_action`
-(Phase 4). The columns and the counter fields that the policy guard will
-enforce (`retry_count`, `reminder_count`, `last_contact_at`) already exist.
+### Phase 3 + 5 — delivered
+
+Risk calculation and bounded execution work without the AI provider. The future
+agent will propose one of the same controlled actions, but cannot bypass policy.
+
+| Area | What exists |
+|---|---|
+| Risk engine | Pure `RiskEngine` contract and deterministic seven-factor implementation |
+| Explainability | Integer 0–100 score, exact risk bands, itemised factors that sum to the score |
+| Risk audit | Every new case records `risk_score_calculated` with engine and factor evidence |
+| Policy guard | Retry/reminder ceilings, contact cooldown, retryability, amount/LTV escalation, terminal safety, and failed-action repetition checks |
+| Controlled actions | Retry payment, payment link, email, WhatsApp, durable retry scheduling, and human escalation |
+| Verification | `POST /api/recovery-cases/{id}/simulate-payment` resolves the approved attempt and updates recovered money |
+| Audit | Approvals, blocks, execution, escalation, failed outcomes, and verified payments are persisted |
+| Concurrency | Workflow rows are locked where supported; successful state/action/audit changes commit atomically |
+| Migration | `6fd47a83c201` adds the durable `scheduled_retry_at` workflow field |
+
+AI-owned fields (`diagnosis`, `confidence`, `recommended_action`) remain unset
+until Phase 4 rather than being populated with fake values. The execute endpoint
+currently accepts an explicit controlled action, which is suitable for API tests
+and will later receive the structured agent recommendation.
 
 ---
 
@@ -499,15 +515,15 @@ The project is complete only when this scenario works end to end:
 - [x] 1. A payment failure is generated
 - [x] 2. A recovery case is automatically created
 - [x] 3. Revenue-at-risk is calculated
-- [ ] 4. Risk score is displayed
+- [x] 4. Deterministic risk score and factors are available
 - [ ] 5. AI diagnoses the failure
 - [ ] 6. AI chooses an intervention
-- [ ] 7. Backend validates the intervention against safety limits
-- [ ] 8. The action is executed
-- [x] 9. Audit trail is created (detection entry; later phases append to it)
-- [ ] 10. Customer payment can be simulated
-- [ ] 11. Case changes to RECOVERED
-- [ ] 12. Recovered revenue increases
+- [x] 7. Backend validates an intervention against safety limits
+- [x] 8. Approved controlled actions are executed
+- [x] 9. Every workflow step, including blocks, is audited
+- [x] 10. Customer payment can be simulated
+- [x] 11. A fully paid case changes to `RECOVERED`
+- [x] 12. Recovered revenue increases from verified money
 - [ ] 13. Dashboard metrics update
 - [ ] 14. Analytics reflect the recovery
 - [ ] 15. The whole workflow demos in under 2 minutes

@@ -61,19 +61,53 @@ def create_payment(
     return transaction
 
 
-def count_recent_failures(db: Session, customer_id: int, *, limit: int = 10) -> int:
-    """How many of a customer's recent transactions failed.
-
-    Feeds the risk engine's "previous payment failures" factor. Historical
-    imports are excluded so a bulk CSV load cannot distort live scoring.
-    """
-    rows = (
-        db.query(Transaction.status)
-        .filter(
-            Transaction.customer_id == customer_id,
-            Transaction.is_historical.is_(False),
+def complete_pending_payment(
+    db: Session,
+    transaction: Transaction,
+    *,
+    succeed: bool,
+    failure_reason: FailureReason | None = None,
+) -> Transaction:
+    """Apply a simulated gateway outcome to an existing pending attempt."""
+    if transaction.status != TransactionStatus.PENDING:
+        raise PaymentError("Only a pending payment attempt can be completed.")
+    if succeed:
+        transaction.status = TransactionStatus.SUCCESS
+        transaction.failure_reason = None
+    else:
+        reason = failure_reason or FailureReason.EXPIRED_CARD
+        transaction.status = (
+            TransactionStatus.ABANDONED
+            if reason == FailureReason.CHECKOUT_ABANDONED
+            else TransactionStatus.FAILED
         )
-        .order_by(Transaction.created_at.desc())
+        transaction.failure_reason = reason.value
+    db.flush()
+    return transaction
+
+
+def count_recent_failures(
+    db: Session,
+    customer_id: int,
+    *,
+    limit: int = 10,
+    exclude_transaction_id: int | None = None,
+) -> int:
+    """How many of a customer's recent live transactions failed.
+
+    Historical imports are excluded so a bulk CSV load cannot distort live
+    scoring. The current recovery transaction can also be excluded so the
+    factor means *previous* failures rather than including the triggering one.
+    """
+    query = db.query(Transaction.status).filter(
+        Transaction.customer_id == customer_id,
+        Transaction.is_historical.is_(False),
+    )
+    if exclude_transaction_id is not None:
+        query = query.filter(Transaction.id != exclude_transaction_id)
+
+    rows = (
+        query.order_by(Transaction.created_at.desc())
         .limit(limit)
         .all()
     )

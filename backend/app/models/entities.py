@@ -145,6 +145,8 @@ class RecoveryCase(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     reminder_count: Mapped[int] = mapped_column(Integer, default=0)
     last_contact_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    #: Durable schedule consumed by a later retry execution request.
+    scheduled_retry_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
 
     created_at: Mapped[datetime] = timestamp_column(index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
