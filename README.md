@@ -10,10 +10,10 @@ DETECT → DIAGNOSE → DECIDE → ACT → VERIFY → RECOVER
 
 Built for the **AI Revenue Recovery** hackathon track.
 
-> **Status: pre-implementation.** This repository currently holds the product
-> requirements and the environment prerequisites. See [`docs/PRD.md`](docs/PRD.md)
-> for the full specification, architecture, build phases, and acceptance
-> criteria.
+> **Status: Phase 1–2 complete.** The database, backend API, seed data, payment
+> simulator, and automatic recovery-case creation are built and tested. The risk
+> engine, AI agent, and frontend are not yet built. See
+> [`docs/PRD.md`](docs/PRD.md) for the full specification and build phases.
 
 ---
 
@@ -22,9 +22,14 @@ Built for the **AI Revenue Recovery** hackathon track.
 | Path | Purpose |
 |---|---|
 | `docs/PRD.md` | The living product requirements document — source of truth |
+| `backend/app/models/` | SQLAlchemy models and domain enums |
+| `backend/app/services/` | Payment, case detection, audit trail, INR formatting |
+| `backend/app/api/routes.py` | REST endpoints |
+| `backend/app/simulations/` | Demo seed data |
+| `backend/alembic/` | Database migrations |
+| `backend/tests/` | End-to-end API flow tests |
 | `.env.example` | Environment variable template |
 | `docker-compose.yml` | PostgreSQL 16 for local development |
-| `backend/requirements.txt` | Pinned Python dependencies |
 | `.gitignore` | Ignores `.venv/`, `node_modules/`, `.env`, build output |
 
 ---
@@ -96,9 +101,72 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-### 4. Frontend environment
+### 4. Apply migrations and seed
+
+```bash
+cd backend
+python -m alembic upgrade head
+python manage.py seed
+```
+
+### 5. Run the API
+
+```bash
+cd backend
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+Interactive API docs: <http://localhost:8000/docs>
+
+### 6. Run the tests
+
+```bash
+cd backend
+python -m pytest
+```
+
+16 tests cover the full flow: seeding, INR formatting, payment simulation,
+automatic case creation, scenario classification, the audit trail, case
+filtering, error handling, and demo reset. They run against a temporary SQLite
+database and need no external services.
+
+### 7. Frontend
 
 Not yet scaffolded — see Phase 7 in the PRD.
+
+---
+
+## Try the flow
+
+With the server running:
+
+```bash
+# Open a recovery case by simulating a failed payment (amounts are in paise)
+curl -X POST http://localhost:8000/api/payments/simulate \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id": 1, "amount": 299900, "succeed": false, "failure_reason": "expired_card"}'
+
+# Inspect the case and its audit trail
+curl http://localhost:8000/api/recovery-cases/1
+```
+
+A **failed** payment automatically opens a recovery case — that is the DETECT
+stage firing, not a separate manual step. A **successful** payment correctly
+opens none.
+
+---
+
+## Conventions
+
+- **Money is stored as integer paise** (₹2,999 = `299900`). Integers avoid the
+  floating-point drift that would otherwise accumulate in recovered-revenue
+  totals. API responses also include a `*_formatted` string using Indian
+  lakh/crore grouping (`₹4,82,500`, not `₹482,500`).
+- **Business logic lives on the backend.** Routers validate, call a service, and
+  shape a response; they contain no business rules.
+- **Nothing is faked.** Fields belonging to a later phase (risk score, AI
+  diagnosis) stay `null` rather than being populated with plausible-looking
+  placeholder values.
 
 ---
 
