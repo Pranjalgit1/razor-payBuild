@@ -459,7 +459,7 @@ Build in incremental *working* stages — no placeholder screens.
 | 1 | Database schema + models + seed data | ✅ Complete |
 | 2 | Payment simulation + recovery case creation | ✅ Complete |
 | 3 | Deterministic risk engine | ✅ Complete |
-| 4 | AI recovery agent (structured decisions) | ⬜ Not started |
+| 4 | AI recovery agent (structured decisions) | ✅ Complete |
 | 5 | Policy guard + recovery action execution | ✅ Complete |
 | 6 | Remaining REST API surface | 🟡 Partial |
 | 7 | Dashboard + cases + case detail | ⬜ Not started |
@@ -484,27 +484,33 @@ entry in the same database transaction; a successful payment opens none.
 | Detection | Failed payments calculate revenue at risk and open one idempotent case |
 | Classification | Failure reason + customer type select one of four scenarios |
 
-### Phase 3 + 5 — delivered
+### Phase 3–5 — delivered
 
-Risk calculation and bounded execution work without the AI provider. The future
-agent will propose one of the same controlled actions, but cannot bypass policy.
+Risk calculation, structured agent decisions, and bounded execution now form a
+working backend loop. The agent proposes one controlled action; it cannot bypass
+policy or directly mutate money, transactions, messages, or cases.
 
 | Area | What exists |
 |---|---|
 | Risk engine | Pure `RiskEngine` contract and deterministic seven-factor implementation |
 | Explainability | Integer 0–100 score, exact risk bands, itemised factors that sum to the score |
-| Risk audit | Every new case records `risk_score_calculated` with engine and factor evidence |
-| Policy guard | Retry/reminder ceilings, contact cooldown, retryability, amount/LTV escalation, terminal safety, and failed-action repetition checks |
+| Agent providers | Swappable Anthropic and deterministic rules providers; missing keys/outages visibly fall back |
+| Structured output | Strict diagnosis, 0–1 confidence, controlled action, public reason, and escalation flag; malformed scalar types/extra fields are rejected |
+| Investigation tools | Four case-scoped read-only tools with bounded, strict inputs and no customer contact details |
+| Anthropic loop | `claude-opus-5`, strict tools, exactly one final submission, bounded turns/calls, no direct side effects |
+| Agent API | `POST /api/recovery-cases/{id}/run-agent` persists DIAGNOSED and DECIDED steps idempotently |
+| Public explanations | Backend-owned templates replace provider prose before API response or persistence |
+| Concurrency | Compare-and-set claim, row locking where supported, and SQLite contention retry produce one decision/audit sequence |
+| Policy guard | Retry/reminder ceilings, cooldown, retryability, amount/LTV escalation, terminal safety, and failed-action repetition checks |
+| Recommendation execution | Empty-body `/execute` consumes the stored recommendation; mismatches are rejected except human escalation |
 | Controlled actions | Retry payment, payment link, email, WhatsApp, durable retry scheduling, and human escalation |
-| Verification | `POST /api/recovery-cases/{id}/simulate-payment` resolves the approved attempt and updates recovered money |
-| Audit | Approvals, blocks, execution, escalation, failed outcomes, and verified payments are persisted |
-| Concurrency | Workflow rows are locked where supported; successful state/action/audit changes commit atomically |
+| Verification | `/simulate-payment` resolves the approved attempt and updates recovered money |
+| Audit | Provider/fallback metadata, diagnosis, decision, approval, block, execution, escalation, and verification are persisted |
 | Migration | `6fd47a83c201` adds the durable `scheduled_retry_at` workflow field |
 
-AI-owned fields (`diagnosis`, `confidence`, `recommended_action`) remain unset
-until Phase 4 rather than being populated with fake values. The execute endpoint
-currently accepts an explicit controlled action, which is suitable for API tests
-and will later receive the structured agent recommendation.
+The rules provider makes the complete demo work without an API key. Availability
+failures may fall back; malformed decisions never do. Provider-authored free
+text, hidden reasoning, and personal identifiers are not persisted.
 
 ---
 
@@ -516,8 +522,8 @@ The project is complete only when this scenario works end to end:
 - [x] 2. A recovery case is automatically created
 - [x] 3. Revenue-at-risk is calculated
 - [x] 4. Deterministic risk score and factors are available
-- [ ] 5. AI diagnoses the failure
-- [ ] 6. AI chooses an intervention
+- [x] 5. AI or deterministic fallback diagnoses the failure
+- [x] 6. A structured agent chooses one controlled intervention
 - [x] 7. Backend validates an intervention against safety limits
 - [x] 8. Approved controlled actions are executed
 - [x] 9. Every workflow step, including blocks, is audited
@@ -554,7 +560,7 @@ The project is complete only when this scenario works end to end:
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Is an `ANTHROPIC_API_KEY` available for the demo, or should it run on the `rules` provider? | Open — `rules` fallback covers either answer |
+| Q1 | Is an `ANTHROPIC_API_KEY` available for the demo, or should it run on the `rules` provider? | Resolved — both paths work; missing key/outage falls back visibly to rules |
 | Q2 | Should Docker/Postgres be required for the demo, or is the SQLite path preferred for judging? | Open — both supported |
 | Q3 | Which Kaggle dataset (if any) will be used for historical analytics? | Open — mapping layer makes this deferrable |
 
@@ -576,6 +582,6 @@ successfully on Python 3.14 before being pinned. The Postgres image pull was
 interrupted by a network error and has not yet been completed — run
 `docker compose up -d` once to finish it.
 
-No application code exists yet by design: this repository intentionally holds
-only the specification and the prerequisites, so implementation starts from a
-clean Phase 1.
+Application code through the structured agent and bounded recovery workflow is
+implemented and validated. The remaining work is the frontend, database-backed
+dashboard/analytics views, historical CSV ingestion, and final demo polish.

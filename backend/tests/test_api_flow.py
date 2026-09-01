@@ -515,3 +515,442 @@ def test_execution_failure_is_audited_without_partial_state(client, seeded, monk
         entry["action_type"] == "recovery_action_failed"
         for entry in detail["actions"]
     )
+
+
+def test_rules_agent_decides_idempotently_and_drives_recovery(client, seeded):
+    neha = client.post(
+        "/api/customers",
+        json={
+            "name": "Agent Demo Customer",
+            "email": "agent.demo@example.com",
+            "phone": "+91 90000 00001",
+            "lifetime_value": 450_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": neha["id"],
+            "amount": 149_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+
+    first = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["idempotent"] is False
+    assert body["case"]["status"] == "decided"
+    assert body["decision"]["diagnosis"] == "expired_card"
+    assert body["decision"]["recommended_action"] == "generate_payment_link"
+    assert body["metadata"]["provider"] == "rules"
+    assert body["metadata"]["configured_provider"] == "anthropic"
+    assert body["metadata"]["fallback_reason"] == "missing_api_key"
+    assert set(body["metadata"]["tool_calls"]) == {
+        "get_customer",
+        "get_transaction",
+        "get_payment_history",
+        "check_payment_status",
+    }
+    assert [item["action_type"] for item in body["audit_actions"]] == [
+        "agent_diagnosis_completed",
+        "agent_decision_recorded",
+    ]
+
+    second = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert second.status_code == 200
+    assert second.json()["idempotent"] is True
+
+    execute = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert execute.status_code == 200, execute.text
+    assert execute.json()["executed"] is True
+    assert execute.json()["details"]["payment_link"].endswith(f"/{case_id}")
+
+    detail = client.get(f"/api/recovery-cases/{case_id}").json()
+    approved = next(
+        action
+        for action in detail["actions"]
+        if action["action_type"] == "recovery_action_approved"
+    )
+    assert approved["details"]["action_source"] == "agent_recommendation"
+    assert approved["details"]["agent_recommended_action"] == "generate_payment_link"
+
+
+def test_execute_rejects_action_that_differs_from_agent_decision(client, seeded):
+    neha = client.post(
+        "/api/customers",
+        json={
+            "name": "Agent Mismatch Customer",
+            "email": "agent.mismatch@example.com",
+            "lifetime_value": 250_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": neha["id"],
+            "amount": 89_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+    assert client.post(f"/api/recovery-cases/{case_id}/run-agent").status_code == 200
+
+    mismatch = client.post(
+        f"/api/recovery-cases/{case_id}/execute",
+        json={"action": "send_email"},
+    )
+    assert mismatch.status_code == 409
+    assert "does not match" in mismatch.json()["detail"]
+
+
+def test_agent_proposal_is_still_blocked_by_backend_policy(client, seeded, monkeypatch):
+    from app.agents.base import AgentProviderResult, AgentRunMetadata
+    from app.agents.schemas import AgentDecision
+    import app.services.agent_service as agent_module
+
+    class UnsafeProvider:
+        name = "test_provider"
+
+        def decide(self, context, tools):
+            return AgentProviderResult(
+                decision=AgentDecision(
+                    diagnosis="insufficient_funds",
+                    confidence=0.99,
+                    recommended_action="generate_payment_link",
+                    reason="Generate a payment link even though this case exceeds policy limits.",
+                    escalation_required=False,
+                ),
+                metadata=AgentRunMetadata(
+                    provider="test_provider",
+                    configured_provider="test_provider",
+                ),
+            )
+
+    monkeypatch.setattr(agent_module, "build_agent_provider", lambda config: UnsafeProvider())
+    acme = client.get("/api/customers", params={"search": "acme"}).json()["items"][0]
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": acme["id"],
+            "amount": 8_500_000,
+            "succeed": False,
+            "failure_reason": "insufficient_funds",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+    agent = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert agent.status_code == 200, agent.text
+    assert agent.json()["decision"]["recommended_action"] == "generate_payment_link"
+
+    execution = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert execution.status_code == 200, execution.text
+    assert execution.json()["executed"] is False
+    assert execution.json()["policy"]["code"] == "amount_requires_escalation"
+    assert execution.json()["case"]["status"] == "escalated"
+    assert execution.json()["audit_action"]["status"] == "blocked"
+
+
+def test_malformed_agent_result_is_rejected_and_audited(client, seeded, monkeypatch):
+    from app.agents.base import AgentInvalidDecision
+    import app.services.agent_service as agent_module
+
+    class MalformedProvider:
+        name = "malformed"
+
+        def decide(self, context, tools):
+            raise AgentInvalidDecision("invalid structured payload")
+
+    monkeypatch.setattr(agent_module, "build_agent_provider", lambda config: MalformedProvider())
+    neha = client.post(
+        "/api/customers",
+        json={
+            "name": "Malformed Agent Customer",
+            "email": "agent.malformed@example.com",
+            "lifetime_value": 100_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": neha["id"],
+            "amount": 59_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+
+    response = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert response.status_code == 502
+    detail = client.get(f"/api/recovery-cases/{case_id}").json()
+    assert detail["status"] == "detected"
+    assert detail["diagnosis"] is None
+    assert detail["recommended_action"] is None
+    failed = next(
+        action
+        for action in detail["actions"]
+        if action["action_type"] == "agent_decision_failed"
+    )
+    assert failed["status"] == "failed"
+    assert "invalid structured payload" not in str(failed["details"])
+
+
+def test_agent_scheduled_recommendation_advances_to_due_retry(client, seeded):
+    from datetime import timedelta
+
+    from app.database.base import utcnow
+    from app.database.session import SessionLocal
+    from app.models.entities import RecoveryCase
+
+    customer = client.post(
+        "/api/customers",
+        json={
+            "name": "Scheduled Agent Customer",
+            "email": "scheduled.agent@example.com",
+            "lifetime_value": 200_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": customer["id"],
+            "amount": 69_900,
+            "succeed": False,
+            "failure_reason": "temporary_bank_failure",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+    agent = client.post(f"/api/recovery-cases/{case_id}/run-agent").json()
+    assert agent["decision"]["recommended_action"] == "schedule_retry"
+
+    scheduled = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert scheduled.status_code == 200
+    assert scheduled.json()["executed"] is True
+    assert scheduled.json()["case"]["scheduled_retry_at"] is not None
+
+    early = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert early.status_code == 200
+    assert early.json()["executed"] is False
+    assert early.json()["policy"]["code"] == "retry_not_due"
+
+    with SessionLocal() as db:
+        case = db.get(RecoveryCase, case_id)
+        case.scheduled_retry_at = utcnow() - timedelta(minutes=1)
+        db.commit()
+
+    due = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert due.status_code == 200, due.text
+    assert due.json()["executed"] is True
+    assert due.json()["case"]["action_taken"] == "retry_payment"
+    assert due.json()["case"]["retry_count"] == 1
+    assert due.json()["details"]["retry_transaction_id"] > 0
+
+    replay = client.post(f"/api/recovery-cases/{case_id}/execute", json={})
+    assert replay.status_code == 409
+    assert "pending verification" in replay.json()["detail"]
+
+    verified = client.post(
+        f"/api/recovery-cases/{case_id}/simulate-payment",
+        json={"succeed": True},
+    )
+    assert verified.status_code == 201
+    assert verified.json()["case"]["status"] == "recovered"
+
+
+def test_stale_agent_decision_cannot_rewind_an_active_case(client, seeded, monkeypatch):
+    from app.agents.base import AgentProviderResult, AgentRunMetadata
+    from app.agents.schemas import AgentDecision
+    from app.database.session import SessionLocal
+    from app.models.entities import RecoveryCase
+    import app.services.agent_service as agent_module
+
+    class StaleProvider:
+        name = "stale"
+
+        def decide(self, context, tools):
+            with SessionLocal() as other_db:
+                case = other_db.get(RecoveryCase, context.case_id)
+                case.status = "verifying"
+                case.action_taken = "generate_payment_link"
+                other_db.commit()
+            return AgentProviderResult(
+                decision=AgentDecision(
+                    diagnosis="expired_card",
+                    confidence=0.9,
+                    recommended_action="generate_payment_link",
+                    reason="A secure payment-method update link is the appropriate next action.",
+                    escalation_required=False,
+                ),
+                metadata=AgentRunMetadata(
+                    provider="stale",
+                    configured_provider="stale",
+                ),
+            )
+
+    monkeypatch.setattr(agent_module, "build_agent_provider", lambda config: StaleProvider())
+    customer = client.post(
+        "/api/customers",
+        json={
+            "name": "Stale Agent Customer",
+            "email": "stale.agent@example.com",
+            "lifetime_value": 100_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": customer["id"],
+            "amount": 39_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+
+    response = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert response.status_code == 409
+    detail = client.get(f"/api/recovery-cases/{case_id}").json()
+    assert detail["status"] == "verifying"
+    assert detail["action_taken"] == "generate_payment_link"
+    assert detail["diagnosis"] is None
+
+
+def test_agent_public_reason_rejects_customer_identifiers(client, seeded, monkeypatch):
+    from app.agents.base import AgentProviderResult, AgentRunMetadata
+    from app.agents.schemas import AgentDecision
+    import app.services.agent_service as agent_module
+
+    customer = client.post(
+        "/api/customers",
+        json={
+            "name": "Private Customer",
+            "email": "private.customer@example.com",
+            "phone": "+91 90000 00009",
+            "lifetime_value": 100_000,
+            "subscription_status": "none",
+        },
+    ).json()
+
+    class UnsafeTextProvider:
+        name = "unsafe_text"
+
+        def decide(self, context, tools):
+            return AgentProviderResult(
+                decision=AgentDecision(
+                    diagnosis="expired_card",
+                    confidence=0.9,
+                    recommended_action="generate_payment_link",
+                    reason="Contact private.customer@example.com because the card has expired.",
+                    escalation_required=False,
+                ),
+                metadata=AgentRunMetadata(
+                    provider="unsafe_text",
+                    configured_provider="unsafe_text",
+                ),
+            )
+
+    monkeypatch.setattr(
+        agent_module,
+        "build_agent_provider",
+        lambda config: UnsafeTextProvider(),
+    )
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": customer["id"],
+            "amount": 49_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+
+    response = client.post(f"/api/recovery-cases/{case_id}/run-agent")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["decision"]["reason"] == (
+        "The expired card requires a secure customer payment or method-update link."
+    )
+    detail = client.get(f"/api/recovery-cases/{case_id}").json()
+    assert detail["decision_reason"] == body["decision"]["reason"]
+    serialized = str(detail["actions"])
+    assert "private.customer@example.com" not in serialized
+
+
+def test_concurrent_agent_runs_converge_to_one_decision(client, seeded, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from app.agents.base import AgentProviderResult, AgentRunMetadata
+    from app.agents.schemas import AgentDecision
+    import app.services.agent_service as agent_module
+
+    barrier = Barrier(2)
+
+    class ConcurrentProvider:
+        name = "concurrent"
+
+        def decide(self, context, tools):
+            barrier.wait(timeout=5)
+            return AgentProviderResult(
+                decision=AgentDecision(
+                    diagnosis="expired_card",
+                    confidence=0.9,
+                    recommended_action="generate_payment_link",
+                    reason="Provider prose is replaced by a backend-owned public explanation.",
+                    escalation_required=False,
+                ),
+                metadata=AgentRunMetadata(
+                    provider="concurrent",
+                    configured_provider="concurrent",
+                ),
+            )
+
+    monkeypatch.setattr(
+        agent_module,
+        "build_agent_provider",
+        lambda config: ConcurrentProvider(),
+    )
+    customer = client.post(
+        "/api/customers",
+        json={
+            "name": "Concurrent Agent Customer",
+            "email": "concurrent.agent@example.com",
+            "lifetime_value": 100_000,
+            "subscription_status": "none",
+        },
+    ).json()
+    created = client.post(
+        "/api/payments/simulate",
+        json={
+            "customer_id": customer["id"],
+            "amount": 29_900,
+            "succeed": False,
+            "failure_reason": "expired_card",
+        },
+    ).json()
+    case_id = created["recovery_case"]["id"]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda _: client.post(f"/api/recovery-cases/{case_id}/run-agent"),
+                range(2),
+            )
+        )
+
+    assert [response.status_code for response in responses] == [200, 200]
+    assert sorted(response.json()["idempotent"] for response in responses) == [False, True]
+    detail = client.get(f"/api/recovery-cases/{case_id}").json()
+    action_types = [action["action_type"] for action in detail["actions"]]
+    assert action_types.count("agent_diagnosis_completed") == 1
+    assert action_types.count("agent_decision_recorded") == 1

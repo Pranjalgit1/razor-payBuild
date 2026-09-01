@@ -17,6 +17,7 @@ def _create_engine() -> Engine:
         # FastAPI serves requests from a thread pool; SQLite needs this to
         # allow a connection to be used outside the thread that created it.
         connect_args["check_same_thread"] = False
+        connect_args["timeout"] = 30.0
 
     engine = create_engine(
         settings.database_url,
@@ -33,6 +34,7 @@ def _create_engine() -> Engine:
             # would let the schema drift from PostgreSQL's behaviour.
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
 
     return engine

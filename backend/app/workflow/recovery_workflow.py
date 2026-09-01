@@ -44,11 +44,14 @@ def run_action(
     action: RecoveryAction,
     *,
     policy: Settings = settings,
+    action_source: str = "manual_operator",
 ) -> RecoveryWorkflowResult:
     """Validate, audit, and execute one controlled recovery action atomically."""
     decision = validate_action(case, action, policy=policy)
     policy_details = {
         "action": action.value,
+        "action_source": action_source,
+        "agent_recommended_action": case.recommended_action,
         "policy_code": decision.code,
         "escalation_required": decision.escalation_required,
         "limits": {

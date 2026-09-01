@@ -10,11 +10,11 @@ DETECT → SCORE → DIAGNOSE → DECIDE → ACT → VERIFY → RECOVER
 
 Built for the **AI Revenue Recovery** hackathon track.
 
-> **Status: backend Phase 1 and Phase 2 complete.** The database, FastAPI API,
-> seed data, payment simulator, automatic recovery-case creation, deterministic
-> risk engine, policy guard, controlled actions, payment verification, and audit
-> trail are implemented and tested. The AI decision provider and frontend are
-> not yet built. See [`docs/PRD.md`](docs/PRD.md) for the full specification.
+> **Status: Phases 1–3 complete (3/5).** The database, FastAPI API, seed data,
+> payment simulator, case detection, deterministic risk engine, bounded recovery
+> workflow, structured AI agent, provider fallback, payment verification, and
+> audit trail are implemented and tested. The Next.js frontend and final demo
+> polish are not yet built. See [`docs/PRD.md`](docs/PRD.md).
 
 ---
 
@@ -24,13 +24,14 @@ Built for the **AI Revenue Recovery** hackathon track.
 |---|---|
 | `docs/PRD.md` | Living product requirements document and source of truth |
 | `backend/app/models/` | SQLAlchemy models and domain enums |
-| `backend/app/risk/` | Deterministic risk-engine contract and rule implementation |
+| `backend/app/risk/` | Deterministic risk-engine contract and rules |
+| `backend/app/agents/` | Strict decisions, scoped tools, Claude and rules providers |
 | `backend/app/workflow/` | Policy guard and bounded recovery orchestration |
-| `backend/app/services/` | Payment, recovery actions, audit, and formatting services |
+| `backend/app/services/` | Agent, payment, action, audit, and formatting services |
 | `backend/app/api/routes.py` | Thin REST endpoints |
 | `backend/app/simulations/` | Deterministic demo seed data |
 | `backend/alembic/` | Database migrations |
-| `backend/tests/` | Unit and end-to-end API tests |
+| `backend/tests/` | Unit, concurrency, policy, and end-to-end API tests |
 | `.env.example` | Environment variable template |
 | `docker-compose.yml` | PostgreSQL 16 for local development |
 
@@ -45,15 +46,15 @@ These versions were verified on Windows 11:
 | **Python** | 3.14.0 | Backend dependencies install cleanly |
 | **Node.js** | 24.13.0 | Reserved for the Next.js frontend |
 | **npm** | 11.6.2 | Ships with Node |
-| **Docker** | 29.6.1 | Docker Desktop must be running for PostgreSQL |
-| **PostgreSQL** | 16-alpine | Provided by `docker-compose.yml` on host port 5433 |
+| **Docker** | 29.6.1 | Docker Desktop must run for PostgreSQL |
+| **PostgreSQL** | 16-alpine | `docker-compose.yml`, host port 5433 |
 
-### Planned stack
+### Stack
 
-- **Frontend** — Next.js, React, TypeScript, Tailwind CSS, Recharts
+- **Frontend** — Next.js, React, TypeScript, Tailwind CSS, Recharts (next phase)
 - **Backend** — Python, FastAPI, SQLAlchemy, Alembic
 - **Database** — PostgreSQL, with a zero-infrastructure SQLite fallback
-- **AI** — Claude API behind a provider interface, with a deterministic fallback
+- **AI** — Claude (`claude-opus-5`) behind a provider interface, with deterministic rules fallback
 
 ---
 
@@ -61,23 +62,23 @@ These versions were verified on Windows 11:
 
 ### 1. Environment variables
 
-On PowerShell:
-
 ```powershell
 Copy-Item .env.example .env
 ```
 
 Then edit `.env`:
 
-- `DATABASE_URL` points at Docker PostgreSQL by default. The included SQLite
-  alternative runs the demo without infrastructure.
-- `ANTHROPIC_API_KEY` is not needed until the AI decision phase is implemented.
+- `DATABASE_URL` points at Docker PostgreSQL by default. Select the included
+  SQLite URL to run without infrastructure.
+- `AI_PROVIDER=anthropic` uses Claude when `ANTHROPIC_API_KEY` is set.
+- Missing Anthropic keys and transient provider outages visibly fall back to the
+  deterministic `rules` provider. Set `AI_PROVIDER=rules` to force offline mode.
+- Malformed provider decisions are rejected and audited; they do not fall back
+  or get coerced into valid decisions.
 
 `.env` is ignored by Git; never commit credentials.
 
 ### 2. Database
-
-Start Docker Desktop, then:
 
 ```powershell
 docker compose up -d
@@ -104,7 +105,7 @@ python manage.py seed
 
 ### 5. Run the API
 
-Run this manually in a terminal because the server is long-lived:
+Run this manually because the server is long-lived:
 
 ```powershell
 Set-Location backend
@@ -124,21 +125,21 @@ Set-Location backend
 python -m pytest -v
 ```
 
-26 tests cover seed data, historical/live separation, payment simulation,
-case creation, deterministic scores and boundaries, audit history, policy
-limits, high-value escalation, contact cooldown, durable retry scheduling,
-retry reconciliation, successful recovery, terminal safety, and API errors.
-They use a temporary SQLite database and require no external services.
+41 tests cover seeding, payment simulation, deterministic risk, strict agent
+outputs, bounded Claude tool calls, provider fallback, read-tool scoping,
+concurrent decision idempotency, recommendation execution, policy blocks,
+contact cooldown, durable scheduling, retry verification, audit safety, and
+recovered-revenue accounting. They use temporary SQLite and need no API key.
 
 ### 7. Frontend
 
-Not yet scaffolded; see the remaining phases in the PRD.
+Not yet scaffolded; this is Phase 4 in the five-phase delivery plan.
 
 ---
 
 ## Try the complete backend flow
 
-With the API running, first create a failed payment (all amounts are paise):
+Create a failed payment (all amounts are paise):
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/payments/simulate `
@@ -146,16 +147,25 @@ curl.exe -X POST http://localhost:8000/api/payments/simulate `
   -d '{"customer_id":1,"amount":299900,"succeed":false,"failure_reason":"expired_card"}'
 ```
 
-The response contains a recovery-case ID, deterministic risk score, risk band,
-and seven itemised score factors. Execute a policy-controlled action:
+Run the structured agent for the returned recovery-case ID:
+
+```powershell
+curl.exe -X POST http://localhost:8000/api/recovery-cases/1/run-agent
+```
+
+The agent can call only four case-scoped read tools. It returns a strict
+five-field decision; the backend persists DIAGNOSED and DECIDED audit steps but
+does not perform the proposed side effect.
+
+Execute the persisted recommendation through the authoritative policy guard:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/recovery-cases/1/execute `
   -H "Content-Type: application/json" `
-  -d '{"action":"generate_payment_link"}'
+  -d '{}'
 ```
 
-Then simulate the customer completing payment:
+Simulate the customer completing payment:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/recovery-cases/1/simulate-payment `
@@ -163,41 +173,46 @@ curl.exe -X POST http://localhost:8000/api/recovery-cases/1/simulate-payment `
   -d '{"succeed":true}'
 ```
 
-Inspect the final state and complete chronological audit trail:
+Inspect final state and the chronological audit trail:
 
 ```powershell
 curl.exe http://localhost:8000/api/recovery-cases/1
 ```
 
 High-value cases, exhausted retry/reminder budgets, premature scheduled retries,
-contact-cooldown violations, repeated failed actions, and terminal cases are
-blocked by backend policy and logged rather than silently executed.
+contact-cooldown violations, mismatched recommendations, repeated failed
+actions, and terminal cases are blocked and logged rather than silently run.
 
 ---
 
+## AI and safety boundaries
+
+- **Strict decisions.** Diagnosis, confidence, one controlled action, public
+  reason, and escalation flag are schema-validated without scalar coercion.
+- **Read-only investigation.** Providers see only case-scoped customer traits,
+  the failed transaction, bounded payment history, and payment status. Contact
+  addresses and writable sessions are not exposed to the model.
+- **Backend-owned public text.** Provider prose is never persisted; concise
+  explanations are generated from validated diagnosis/action enums.
+- **Visible fallback.** Responses and audits identify the effective provider,
+  configured provider, model, tool calls, and fallback reason.
+- **AI proposes; backend disposes.** Every recommendation still passes retry,
+  reminder, cooldown, amount, LTV, retryability, schedule, and terminal checks.
+- **Concurrent safety.** A compare-and-set claim and SQLite contention retries
+  ensure concurrent agent runs persist exactly one decision and audit sequence.
+
 ## Conventions
 
-- **Money is integer paise.** ₹2,999 is `299900`; response fields also include
-  Indian-grouped display strings such as `₹4,82,500`.
-- **Risk is deterministic and labelled rule-based.** Seven visible factor
-  contributions always add up to the public 0–100 score.
-- **The backend is authoritative.** Routers validate and delegate; risk,
-  eligibility, limits, money, state transitions, and side effects live in
-  backend services and workflows.
-- **Actions are bounded.** The backend enforces retry/reminder limits, a
-  24-hour contact cooldown, high-value escalation, retryability, terminal-state
-  safety, and the rule that a failing action is not repeated.
-- **Every outcome is auditable.** Detection, scoring, approvals, blocks,
-  execution, escalation, failed payment responses, and verified recovery create
-  real `agent_actions` records.
-- **Nothing is faked.** AI diagnosis fields remain `null` until the structured
-  AI decision phase is implemented.
+- Money is integer paise; responses include Indian-grouped display strings.
+- Risk is deterministic, labelled rule-based, and its factors sum to the score.
+- Business logic, state transitions, money, and eligibility live in the backend.
+- Every detection, score, diagnosis, decision, approval, block, execution,
+  escalation, failure, and verified recovery creates a real audit record.
 
 ---
 
 ## Next steps
 
-Implement the structured AI recovery agent and rules fallback, then complete the
-remaining REST dashboard/analytics endpoints before building the frontend. The
-AI will only propose an action; the existing backend policy guard remains the
-authority that approves, blocks, or escalates it.
+Build Phase 4: the Next.js dashboard and recovery-case UI using these existing
+APIs and database-computed metrics. Phase 5 will polish the UI and package the
+complete flow into a two-minute buildathon demo.
