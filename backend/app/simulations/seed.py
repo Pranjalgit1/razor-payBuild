@@ -184,6 +184,7 @@ def seed_demo_data(db: Session, *, reset: bool = True) -> dict[str, int]:
                     ),
                     failure_reason=reason.value if reason else None,
                     attempt_number=1,
+                    is_historical=True,
                     created_at=now - timedelta(days=months_ago * 30, hours=rng.randint(0, 20)),
                 )
             )
