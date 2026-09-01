@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rr-postgres
+    environment:
+      POSTGRES_USER: revenue
+      POSTGRES_PASSWORD: revenue
+      POSTGRES_DB: revenuerecover
+    ports:
+      # 5433 on the host to avoid clashing with a local Postgres on 5432.
+      - "5433:5432"
+    volumes:
+      - rr-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revenue -d revenuerecover"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rr-pgdata:
