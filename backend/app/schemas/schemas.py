@@ -13,6 +13,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
 from app.agents.schemas import AgentDecision, Diagnosis
+from app.database.base import utcnow
 from app.models.enums import (
     ActionStatus,
     CaseStatus,
@@ -191,6 +192,15 @@ class RecoveryCaseRead(ORMModel):
 
     @computed_field
     @property
+    def scheduled_retry_due(self) -> bool:
+        """Backend-time capability hint; policy remains authoritative."""
+        return (
+            self.scheduled_retry_at is not None
+            and self.scheduled_retry_at <= utcnow()
+        )
+
+    @computed_field
+    @property
     def amount_at_risk_formatted(self) -> str:
         return format_inr(self.amount_at_risk)
 
@@ -204,6 +214,29 @@ class RecoveryCaseListItem(RecoveryCaseRead):
     """Row shape for the Recovery Cases table."""
 
     customer: CustomerRead
+    failure_reason: FailureReason | None = None
+
+
+class DashboardRead(BaseModel):
+    """Database-computed headline metrics and newest recovery cases."""
+
+    revenue_at_risk: int = Field(description="Outstanding paise on active cases")
+    revenue_recovered: int = Field(description="Verified recovered paise")
+    recovery_rate: float = Field(ge=0, le=100)
+    active_recovery_cases: int = Field(ge=0)
+    total_recovery_cases: int = Field(ge=0)
+    recovered_cases: int = Field(ge=0)
+    recent_cases: list[RecoveryCaseListItem] = Field(default_factory=list)
+
+    @computed_field
+    @property
+    def revenue_at_risk_formatted(self) -> str:
+        return format_inr(self.revenue_at_risk)
+
+    @computed_field
+    @property
+    def revenue_recovered_formatted(self) -> str:
+        return format_inr(self.revenue_recovered)
 
 
 class RecoveryCaseDetail(RecoveryCaseRead):

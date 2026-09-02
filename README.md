@@ -10,11 +10,13 @@ DETECT → SCORE → DIAGNOSE → DECIDE → ACT → VERIFY → RECOVER
 
 Built for the **AI Revenue Recovery** hackathon track.
 
-> **Status: Phases 1–3 complete (3/5).** The database, FastAPI API, seed data,
-> payment simulator, case detection, deterministic risk engine, bounded recovery
-> workflow, structured AI agent, provider fallback, payment verification, and
-> audit trail are implemented and tested. The Next.js frontend and final demo
-> polish are not yet built. See [`docs/PRD.md`](docs/PRD.md).
+> **Status: Phases 1–4 complete (4/5).** The database, FastAPI API,
+> deterministic risk and policy layers, structured Claude/Grok agent, verified
+> recovery accounting, database-computed dashboard, case workflow UI, payment
+> simulator, customer view, and audit activity feed are implemented. The backend
+> suite, production frontend build, and an end-to-end KPI smoke flow pass.
+> Phase 5 remains for final analytics, polish, and the two-minute demo package.
+> See [`docs/PRD.md`](docs/PRD.md).
 
 ---
 
@@ -32,6 +34,7 @@ Built for the **AI Revenue Recovery** hackathon track.
 | `backend/app/simulations/` | Deterministic demo seed data |
 | `backend/alembic/` | Database migrations |
 | `backend/tests/` | Unit, concurrency, policy, and end-to-end API tests |
+| `frontend/` | Next.js dashboard, recovery cases, simulator, customers, and activity UI |
 | `.env.example` | Environment variable template |
 | `docker-compose.yml` | PostgreSQL 16 for local development |
 
@@ -44,14 +47,14 @@ These versions were verified on Windows 11:
 | Tool | Version | Notes |
 |---|---|---|
 | **Python** | 3.14.0 | Backend dependencies install cleanly |
-| **Node.js** | 24.13.0 | Reserved for the Next.js frontend |
+| **Node.js** | 24.13.0 | Next.js frontend runtime |
 | **npm** | 11.6.2 | Ships with Node |
 | **Docker** | 29.6.1 | Docker Desktop must run for PostgreSQL |
 | **PostgreSQL** | 16-alpine | `docker-compose.yml`, host port 5433 |
 
 ### Stack
 
-- **Frontend** — Next.js, React, TypeScript, Tailwind CSS, Recharts (next phase)
+- **Frontend** — Next.js 16, React 19, TypeScript, responsive CSS, Lucide icons
 - **Backend** — Python, FastAPI, SQLAlchemy, Alembic
 - **Database** — PostgreSQL, with a zero-infrastructure SQLite fallback
 - **AI** — Grok (`grok-4.6`) or Claude (`claude-opus-5`) behind one provider interface, with deterministic rules fallback
@@ -137,7 +140,25 @@ recovered-revenue accounting. They use temporary SQLite and need no API key.
 
 ### 7. Frontend
 
-Not yet scaffolded; this is Phase 4 in the five-phase delivery plan.
+Install and configure the public API origin:
+
+```powershell
+Set-Location frontend
+Copy-Item .env.local.example .env.local
+npm install
+```
+
+Run the Next.js development server manually because it is long-lived:
+
+```powershell
+Set-Location frontend
+npm run dev
+```
+
+Open <http://localhost:3000>. The UI includes live database-backed KPIs,
+filterable recovery cases, full case workflow controls, a payment simulator,
+customers, and agent activity. FastAPI must be running on port 8000 unless
+`NEXT_PUBLIC_API_BASE_URL` is changed.
 
 ---
 
@@ -217,6 +238,7 @@ actions, and terminal cases are blocked and logged rather than silently run.
 
 ## Next steps
 
-Build Phase 4: the Next.js dashboard and recovery-case UI using these existing
-APIs and database-computed metrics. Phase 5 will polish the UI and package the
-complete flow into a two-minute buildathon demo.
+Phase 5 will add database-backed analytics visualizations, complete final visual
+polish and accessibility review, and package the end-to-end workflow into a
+rehearsed two-minute buildathon demo. No chart will be added until its metrics
+are defined and computed by the backend.

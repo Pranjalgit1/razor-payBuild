@@ -26,6 +26,7 @@ from app.schemas.schemas import (
     AgentActionRead,
     CustomerCreate,
     CustomerRead,
+    DashboardRead,
     OperationResult,
     Page,
     PaymentSimulationRequest,
@@ -40,11 +41,41 @@ from app.schemas.schemas import (
     RunAgentResponse,
     TransactionRead,
 )
-from app.services import agent_service, case_service, payment_service, risk_service
+from app.services import (
+    agent_service,
+    case_service,
+    dashboard_service,
+    payment_service,
+    risk_service,
+)
 from app.simulations.seed import reset_demo_data, seed_demo_data
 from app.workflow import RecoveryWorkflowError, record_customer_payment, run_action
 
 router = APIRouter(prefix="/api")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@dashboard_router.get("", response_model=DashboardRead)
+def get_dashboard(db: Session = Depends(get_db)) -> DashboardRead:
+    snapshot = dashboard_service.get_dashboard(db)
+    return DashboardRead(
+        revenue_at_risk=snapshot.revenue_at_risk,
+        revenue_recovered=snapshot.revenue_recovered,
+        recovery_rate=snapshot.recovery_rate,
+        active_recovery_cases=snapshot.active_recovery_cases,
+        total_recovery_cases=snapshot.total_recovery_cases,
+        recovered_cases=snapshot.recovered_cases,
+        recent_cases=[
+            RecoveryCaseListItem.model_validate(case)
+            for case in snapshot.recent_cases
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +457,10 @@ def list_recovery_cases(
     created_after: datetime | None = None,
     created_before: datetime | None = None,
 ) -> Page[RecoveryCaseListItem]:
-    query = db.query(RecoveryCase).options(selectinload(RecoveryCase.customer))
+    query = db.query(RecoveryCase).options(
+        selectinload(RecoveryCase.customer),
+        selectinload(RecoveryCase.transaction),
+    )
 
     if case_status is not None:
         query = query.filter(RecoveryCase.status == case_status.value)
@@ -534,6 +568,7 @@ def clear_demo(db: Session = Depends(get_db)) -> OperationResult:
 
 
 for sub in (
+    dashboard_router,
     customers_router,
     transactions_router,
     payments_router,

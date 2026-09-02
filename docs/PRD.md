@@ -89,7 +89,7 @@ The system then:
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ Next.js frontend (App Router, TypeScript, Tailwind, Recharts) │
+│ Next.js frontend (App Router, TypeScript, responsive CSS)     │
 └───────────────────────────┬───────────────────────────────────┘
                             │  REST (JSON)
 ┌───────────────────────────▼───────────────────────────────────┐
@@ -464,8 +464,8 @@ Build in incremental *working* stages — no placeholder screens.
 | 4 | AI recovery agent (structured decisions) | ✅ Complete |
 | 5 | Policy guard + recovery action execution | ✅ Complete |
 | 6 | Remaining REST API surface | 🟡 Partial |
-| 7 | Dashboard + cases + case detail | ⬜ Not started |
-| 8 | Analytics + agent activity | ⬜ Not started |
+| 7 | Dashboard + cases + case detail | ✅ Complete |
+| 8 | Analytics + agent activity | 🟡 Activity complete; analytics pending |
 | 9 | Historical CSV ingestion | ⬜ Not started |
 | 10 | UI polish + responsiveness | ⬜ Not started |
 
@@ -532,7 +532,7 @@ The project is complete only when this scenario works end to end:
 - [x] 10. Customer payment can be simulated
 - [x] 11. A fully paid case changes to `RECOVERED`
 - [x] 12. Recovered revenue increases from verified money
-- [ ] 13. Dashboard metrics update
+- [x] 13. Dashboard metrics update
 - [ ] 14. Analytics reflect the recovery
 - [ ] 15. The whole workflow demos in under 2 minutes
 
@@ -584,6 +584,9 @@ successfully on Python 3.14 before being pinned. The Postgres image pull was
 interrupted by a network error and has not yet been completed — run
 `docker compose up -d` once to finish it.
 
-Application code through the structured agent and bounded recovery workflow is
-implemented and validated. The remaining work is the frontend, database-backed
-dashboard/analytics views, historical CSV ingestion, and final demo polish.
+Application code through the responsive Phase 4 dashboard, case workflow UI,
+and database-backed headline metrics is implemented. The existing backend suite,
+production frontend checks, and an end-to-end SQLite KPI smoke flow pass; the
+aggregate query has not yet been exercised against PostgreSQL. Remaining work
+is analytics visualization, historical CSV ingestion, final accessibility and
+visual polish, and packaging the full flow into a two-minute demo.

@@ -167,6 +167,11 @@ class RecoveryCase(Base):
     )
 
     @property
+    def failure_reason(self) -> str | None:
+        """Expose the triggering problem to list/read schemas."""
+        return self.transaction.failure_reason
+
+    @property
     def is_terminal(self) -> bool:
         from app.models.enums import TERMINAL_CASE_STATUSES
 
