@@ -89,7 +89,7 @@ The system then:
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ Next.js frontend (App Router, TypeScript, Tailwind, Recharts) │
+│ Next.js frontend (App Router, TypeScript, responsive CSS)     │
 └───────────────────────────┬───────────────────────────────────┘
                             │  REST (JSON)
 ┌───────────────────────────▼───────────────────────────────────┐
@@ -180,9 +180,11 @@ The MVP must work fully without the ML model.
 
 ### Provider
 
-Claude API (`claude-opus-5`) via the official `anthropic` Python SDK, behind a
-provider interface so it can be swapped. A deterministic `rules` provider is
-included as a fallback so the entire demo runs without an API key.
+Claude (`claude-opus-5`) via the official `anthropic` SDK and Grok
+(`grok-4.6`) via xAI's OpenAI-compatible API are available behind the same
+provider interface. Both use strict, bounded structured tool calling. A
+deterministic `rules` provider remains the visible fallback so the complete
+demo works without an API key or during transient provider outages.
 
 ### Decision contract
 
@@ -456,16 +458,61 @@ Build in incremental *working* stages — no placeholder screens.
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | Prerequisites verified, env/infra config committed | ✅ Complete |
-| 1 | Database schema + models + seed data | ⬜ Not started |
-| 2 | Payment simulation + recovery case creation | ⬜ Not started |
-| 3 | Risk engine | ⬜ Not started |
-| 4 | AI recovery agent (structured decisions) | ⬜ Not started |
-| 5 | Policy guard + recovery action execution | ⬜ Not started |
-| 6 | REST API surface | ⬜ Not started |
-| 7 | Dashboard + cases + case detail | ⬜ Not started |
-| 8 | Analytics + agent activity | ⬜ Not started |
+| 1 | Database schema + models + seed data | ✅ Complete |
+| 2 | Payment simulation + recovery case creation | ✅ Complete |
+| 3 | Deterministic risk engine | ✅ Complete |
+| 4 | AI recovery agent (structured decisions) | ✅ Complete |
+| 5 | Policy guard + recovery action execution | ✅ Complete |
+| 6 | Remaining REST API surface | 🟡 Partial |
+| 7 | Dashboard + cases + case detail | ✅ Complete |
+| 8 | Analytics + agent activity | 🟡 Activity complete; analytics pending |
 | 9 | Historical CSV ingestion | ⬜ Not started |
 | 10 | UI polish + responsiveness | ⬜ Not started |
+
+---
+
+### Phase 1 + 2 — delivered
+
+The schema, seed data, payment simulator, and automatic case creation are
+implemented. A failed payment opens one recovery case and writes the first audit
+entry in the same database transaction; a successful payment opens none.
+
+| Area | What exists |
+|---|---|
+| Schema | 5 core tables via Alembic migration `213bb5ec98a1` |
+| Models | `Customer`, `Transaction`, `RecoveryCase`, `AgentAction`, `Message` |
+| Seed | 8 demo customers and 48 correctly marked historical transactions |
+| Simulation | `POST /api/payments/simulate` for successful or failed events |
+| Detection | Failed payments calculate revenue at risk and open one idempotent case |
+| Classification | Failure reason + customer type select one of four scenarios |
+
+### Phase 3–5 — delivered
+
+Risk calculation, structured agent decisions, and bounded execution now form a
+working backend loop. The agent proposes one controlled action; it cannot bypass
+policy or directly mutate money, transactions, messages, or cases.
+
+| Area | What exists |
+|---|---|
+| Risk engine | Pure `RiskEngine` contract and deterministic seven-factor implementation |
+| Explainability | Integer 0–100 score, exact risk bands, itemised factors that sum to the score |
+| Agent providers | Swappable Anthropic, xAI/Grok, and deterministic rules providers; missing keys/transient outages visibly fall back |
+| Structured output | Strict diagnosis, 0–1 confidence, controlled action, public reason, and escalation flag; malformed scalar types/extra fields are rejected |
+| Investigation tools | Four case-scoped read-only tools with bounded, strict inputs and no customer contact details |
+| Live-provider loops | `claude-opus-5` or `grok-4.6`, strict tools, exactly one final submission, bounded turns/calls, no direct side effects |
+| Agent API | `POST /api/recovery-cases/{id}/run-agent` persists DIAGNOSED and DECIDED steps idempotently |
+| Public explanations | Backend-owned templates replace provider prose before API response or persistence |
+| Concurrency | Compare-and-set claim, row locking where supported, and SQLite contention retry produce one decision/audit sequence |
+| Policy guard | Retry/reminder ceilings, cooldown, retryability, amount/LTV escalation, terminal safety, and failed-action repetition checks |
+| Recommendation execution | Empty-body `/execute` consumes the stored recommendation; mismatches are rejected except human escalation |
+| Controlled actions | Retry payment, payment link, email, WhatsApp, durable retry scheduling, and human escalation |
+| Verification | `/simulate-payment` resolves the approved attempt and updates recovered money |
+| Audit | Provider/fallback metadata, diagnosis, decision, approval, block, execution, escalation, and verification are persisted |
+| Migration | `6fd47a83c201` adds the durable `scheduled_retry_at` workflow field |
+
+The rules provider makes the complete demo work without an API key. Availability
+failures may fall back; malformed decisions never do. Provider-authored free
+text, hidden reasoning, and personal identifiers are not persisted.
 
 ---
 
@@ -473,19 +520,19 @@ Build in incremental *working* stages — no placeholder screens.
 
 The project is complete only when this scenario works end to end:
 
-- [ ] 1. A payment failure is generated
-- [ ] 2. A recovery case is automatically created
-- [ ] 3. Revenue-at-risk is calculated
-- [ ] 4. Risk score is displayed
-- [ ] 5. AI diagnoses the failure
-- [ ] 6. AI chooses an intervention
-- [ ] 7. Backend validates the intervention against safety limits
-- [ ] 8. The action is executed
-- [ ] 9. Audit trail is created
-- [ ] 10. Customer payment can be simulated
-- [ ] 11. Case changes to RECOVERED
-- [ ] 12. Recovered revenue increases
-- [ ] 13. Dashboard metrics update
+- [x] 1. A payment failure is generated
+- [x] 2. A recovery case is automatically created
+- [x] 3. Revenue-at-risk is calculated
+- [x] 4. Deterministic risk score and factors are available
+- [x] 5. AI or deterministic fallback diagnoses the failure
+- [x] 6. A structured agent chooses one controlled intervention
+- [x] 7. Backend validates an intervention against safety limits
+- [x] 8. Approved controlled actions are executed
+- [x] 9. Every workflow step, including blocks, is audited
+- [x] 10. Customer payment can be simulated
+- [x] 11. A fully paid case changes to `RECOVERED`
+- [x] 12. Recovered revenue increases from verified money
+- [x] 13. Dashboard metrics update
 - [ ] 14. Analytics reflect the recovery
 - [ ] 15. The whole workflow demos in under 2 minutes
 
@@ -502,7 +549,12 @@ The project is complete only when this scenario works end to end:
 | D5 | Read-only tools exposed to the AI; write actions executed by the backend | Implements the "AI proposes, backend disposes" boundary that makes the workflow bounded |
 | D6 | `rules` provider as an AI fallback | The demo must never fail because of a missing API key or network outage |
 | D7 | Risk engine is deterministic and labelled rule-based | The PRD explicitly forbids presenting rule-based scoring as AI |
-| D8 | Model `claude-opus-5` | Current-generation default; structured outputs + tool calling |
+| D8 | Provider defaults: `claude-opus-5` and `grok-4.6` | Current structured-output and tool-calling defaults, with `AGENT_MODEL` available as an override |
+| D9 | Enums stored as `VARCHAR`, not native DB enum types | Keeps the schema portable between PostgreSQL and SQLite, and avoids a migration every time a value is added |
+| D10 | Custom `UTCDateTime` column type | SQLite discards `tzinfo`, so timestamps would be naive there and aware on PostgreSQL. This normalises both directions |
+| D11 | Seed loads history only — never open cases | Every case a judge sees is genuinely produced by the workflow rather than inserted by the seeder |
+| D12 | `recovery_cases.transaction_id` is UNIQUE | Makes detection idempotent: re-simulating the same transaction cannot open a duplicate case |
+| D13 | Responses carry pre-formatted `*_formatted` currency strings | Indian lakh/crore grouping (₹4,82,500) is implemented once on the backend instead of being reimplemented in TypeScript |
 
 ---
 
@@ -510,7 +562,7 @@ The project is complete only when this scenario works end to end:
 
 | # | Question | Status |
 |---|---|---|
-| Q1 | Is an `ANTHROPIC_API_KEY` available for the demo, or should it run on the `rules` provider? | Open — `rules` fallback covers either answer |
+| Q1 | Is an `ANTHROPIC_API_KEY` or `XAI_API_KEY` available for the demo, or should it run on `rules`? | Resolved — all paths work; missing key/transient outage falls back visibly to rules |
 | Q2 | Should Docker/Postgres be required for the demo, or is the SQLite path preferred for judging? | Open — both supported |
 | Q3 | Which Kaggle dataset (if any) will be used for historical analytics? | Open — mapping layer makes this deferrable |
 
@@ -532,6 +584,9 @@ successfully on Python 3.14 before being pinned. The Postgres image pull was
 interrupted by a network error and has not yet been completed — run
 `docker compose up -d` once to finish it.
 
-No application code exists yet by design: this repository intentionally holds
-only the specification and the prerequisites, so implementation starts from a
-clean Phase 1.
+Application code through the responsive Phase 4 dashboard, case workflow UI,
+and database-backed headline metrics is implemented. The existing backend suite,
+production frontend checks, and an end-to-end SQLite KPI smoke flow pass; the
+aggregate query has not yet been exercised against PostgreSQL. Remaining work
+is analytics visualization, historical CSV ingestion, final accessibility and
+visual polish, and packaging the full flow into a two-minute demo.
