@@ -98,9 +98,27 @@ td small { margin-top: 5px; color: #7a899d; font-size: 10px; }
 .icon-link { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid #d5e0ec; border-radius: 7px; background: #ffffff; color: #7091bc; }
 .icon-link:hover { border-color: #a9c7f4; background: var(--accent-soft); color: var(--accent); }
 .badge { display: inline-flex; width: max-content; align-items: center; padding: 5px 9px; border: 1px solid #cfdcec; border-radius: 99px; background: #f1f5fa; color: #58708f; font-size: 10px; font-weight: 750; text-transform: capitalize; }
-.badge.success { border-color: #a9caf8; background: #e6f0ff; color: #005bd8; }
-.badge.warning { border-color: #c1d6f2; background: #edf4ff; color: #315f9f; }
-.badge.danger { border-color: #9dbce8; background: #dbeaff; color: #174d96; }
+/* Low risk — green */
+.badge.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+/* Medium risk — yellow */
+.badge.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #a16207;
+}
+
+/* High and critical risk — slight red */
+.badge.danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+}
+
 
 .filter-bar { display: flex; align-items: center; gap: 10px; padding: 14px; flex-wrap: wrap; }
 .filter-title { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; color: #57708f; font-size: 11px; font-weight: 750; }
