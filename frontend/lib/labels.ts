@@ -24,8 +24,8 @@ export function statusTone(status: CaseStatus | string): string {
 }
 
 export function riskTone(risk: RiskLevel | null): string {
-  if (risk === "critical") return "danger";
-  if (risk === "high") return "warning";
+  if (risk === "critical" || risk === "high") return "danger";
+  if (risk === "medium") return "warning";
   if (risk === "low") return "success";
   return "neutral";
 }
