@@ -1,100 +1,123 @@
 # RevenueRecover AI
 
-An AI revenue recovery agent that detects revenue at risk, diagnoses the cause,
-selects a recovery intervention, executes a bounded recovery workflow, and
-measures the money actually recovered.
+RevenueRecover AI is a full-stack revenue-operations demo that identifies failed payments, opens recovery cases, calculates deterministic risk, obtains a structured recovery recommendation, enforces policy, and records verified recovered revenue.
 
+It is deliberately **not a chatbot**. AI is a constrained decision layer inside a backend-controlled workflow: it can inspect a bounded, case-specific context and propose an action, but it cannot directly charge a customer or send communications.
+
+## Highlights
+
+- Simulate successful or failed customer payments.
+- Automatically create and risk-score recovery cases for failed payments.
+- Use deterministic, explainable risk scoring with a score from 0–100.
+- Run a structured recovery agent using Anthropic, xAI/Grok, or the offline `rules` provider.
+- Enforce backend policy for retry limits, reminders, cooldowns, high-value cases, scheduling, and terminal states.
+- Execute controlled recovery actions and simulate a verified customer payment.
+- Track dashboard metrics, recovery status, and a durable audit trail.
+- Run locally with SQLite, or PostgreSQL via Docker Compose.
+
+> **Demo scope:** payment processing and recovery actions are simulated. This repository does not make live Razorpay, Stripe, email, or WhatsApp calls.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    UI["Next.js dashboard\nReact + TypeScript"]
+    API["FastAPI REST API\nThin routes + validation"]
+    DB[("PostgreSQL or SQLite\nCustomers · Transactions · Cases · Audits")]
+
+    UI -->|JSON over HTTP| API
+    API --> DB
+
+    subgraph Backend["Recovery workflow"]
+        Detect["Detect failed payment\nand open case"]
+        Risk["Rule-based risk engine\n0–100 score + factors"]
+        Agent["Structured recovery agent\nAnthropic · xAI · rules"]
+        Policy["Backend policy guard\nAuthoritative limits"]
+        Action["Controlled action executor\nRetry · link · contact · escalate"]
+        Verify["Payment verification\nand recovery accounting"]
+
+        Detect --> Risk --> Agent --> Policy --> Action --> Verify
+    end
+
+    API --> Detect
+    Verify --> DB
+    Agent -. "bounded, read-only\ncase context" .-> DB
 ```
-DETECT → SCORE → DIAGNOSE → DECIDE → ACT → VERIFY → RECOVER
+
+### Recovery lifecycle
+
+```text
+Failed payment
+  → detect revenue at risk
+  → open and score recovery case
+  → agent diagnoses and recommends one action
+  → backend validates policy and executes or blocks it
+  → customer payment is simulated and verified
+  → recovered revenue and audit history are updated
 ```
 
-Built for the **AI Revenue Recovery** hackathon track.
+### Safety model
 
-> **Status: Phases 1–4 complete (4/5).** The database, FastAPI API,
-> deterministic risk and policy layers, structured Claude/Grok agent, verified
-> recovery accounting, database-computed dashboard, case workflow UI, payment
-> simulator, customer view, and audit activity feed are implemented. The backend
-> suite, production frontend build, and an end-to-end KPI smoke flow pass.
-> Phase 5 remains for final analytics, polish, and the two-minute demo package.
-> See [`docs/PRD.md`](docs/PRD.md).
+The agent proposes; the backend decides and executes. Provider outputs are schema-validated, scoped to the active case, and checked against policy before any effect occurs. Policy limits include maximum retries and reminders, customer-contact cooldowns, scheduling rules, high-value thresholds, and terminal case states. Every detection, decision, approval, block, action, and payment outcome is written to the audit trail.
 
----
+## Technology
 
-## Repository contents
-
-| Path | Purpose |
+| Area | Implementation |
 |---|---|
-| `docs/PRD.md` | Living product requirements document and source of truth |
-| `backend/app/models/` | SQLAlchemy models and domain enums |
-| `backend/app/risk/` | Deterministic risk-engine contract and rules |
-| `backend/app/agents/` | Strict decisions, scoped tools, Claude, Grok, and rules providers |
-| `backend/app/workflow/` | Policy guard and bounded recovery orchestration |
-| `backend/app/services/` | Agent, payment, action, audit, and formatting services |
-| `backend/app/api/routes.py` | Thin REST endpoints |
-| `backend/app/simulations/` | Deterministic demo seed data |
-| `backend/alembic/` | Database migrations |
-| `backend/tests/` | Unit, concurrency, policy, and end-to-end API tests |
-| `frontend/` | Next.js dashboard, recovery cases, simulator, customers, and activity UI |
-| `.env.example` | Environment variable template |
-| `docker-compose.yml` | PostgreSQL 16 for local development |
+| Frontend | Next.js 16, React 19, TypeScript, Lucide |
+| Backend | Python, FastAPI, Pydantic, SQLAlchemy |
+| Database | SQLite for local demos; PostgreSQL for Docker-backed development |
+| Migrations | Alembic |
+| AI providers | Anthropic, xAI/Grok, or deterministic offline rules |
+| Testing | Pytest |
 
----
+## Repository layout
 
-## Prerequisites
+```text
+.
+├── backend/
+│   ├── app/
+│   │   ├── agents/          # Provider abstraction and structured decisions
+│   │   ├── api/             # FastAPI routes
+│   │   ├── models/          # SQLAlchemy entities and enums
+│   │   ├── risk/            # Deterministic risk scoring
+│   │   ├── services/        # Domain services and audit logging
+│   │   ├── simulations/     # Demo seed data
+│   │   └── workflow/        # Policy guard and recovery state machine
+│   ├── alembic/             # Schema migrations
+│   └── tests/               # Backend tests
+├── frontend/                # Next.js App Router dashboard
+├── docs/PRD.md              # Product requirements and project context
+├── .env.example             # Backend environment template
+└── docker-compose.yml       # Optional local PostgreSQL service
+```
 
-These versions were verified on Windows 11:
+## Quick start
 
-| Tool | Version | Notes |
-|---|---|---|
-| **Python** | 3.14.0 | Backend dependencies install cleanly |
-| **Node.js** | 24.13.0 | Next.js frontend runtime |
-| **npm** | 11.6.2 | Ships with Node |
-| **Docker** | 29.6.1 | Docker Desktop must run for PostgreSQL |
-| **PostgreSQL** | 16-alpine | `docker-compose.yml`, host port 5433 |
+### Prerequisites
 
-### Stack
+- Python 3.14 or a compatible Python version
+- Node.js and npm
+- Docker Desktop (optional, required only for the PostgreSQL route)
 
-- **Frontend** — Next.js 16, React 19, TypeScript, responsive CSS, Lucide icons
-- **Backend** — Python, FastAPI, SQLAlchemy, Alembic
-- **Database** — PostgreSQL, with a zero-infrastructure SQLite fallback
-- **AI** — Grok (`grok-4.6`) or Claude (`claude-opus-5`) behind one provider interface, with deterministic rules fallback
+### 1. Configure the backend
 
----
-
-## Setup
-
-### 1. Environment variables
+From the repository root, create your local environment file:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Then edit `.env`:
+For a fully offline, zero-infrastructure demo, edit `.env` to use:
 
-- `DATABASE_URL` points at Docker PostgreSQL by default. Select the included
-  SQLite URL to run without infrastructure.
-- For Grok, set `AI_PROVIDER=xai` (the `grok` alias also works) and place a
-  newly rotated key in `XAI_API_KEY`. The default model is `grok-4.6`.
-- For Claude, set `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`; its default
-  model is `claude-opus-5`.
-- `AGENT_MODEL` is optional and overrides the selected provider's default.
-- Missing keys and transient provider outages visibly fall back to the
-  deterministic `rules` provider. Set `AI_PROVIDER=rules` to force offline mode.
-- Malformed provider decisions are rejected and audited; they do not fall back
-  or get coerced into valid decisions.
-
-`.env` is ignored by Git; never commit credentials.
-
-### 2. Database
-
-```powershell
-docker compose up -d
-docker compose exec postgres pg_isready -U revenue -d revenuerecover
+```env
+DATABASE_URL=sqlite+pysqlite:///./revenuerecover.db
+AI_PROVIDER=rules
 ```
 
-SQLite can be used instead by selecting its `DATABASE_URL` in `.env`.
+Do not commit `.env`; it can contain real database credentials and AI provider keys. Keep `.env.example` limited to safe placeholders or local development defaults.
 
-### 3. Backend environment
+### 2. Install backend dependencies
 
 ```powershell
 python -m venv .venv
@@ -102,7 +125,9 @@ python -m venv .venv
 python -m pip install -r backend\requirements.txt
 ```
 
-### 4. Apply migrations and seed
+### 3. Create the schema and demo data
+
+Use migrations for the normal local setup:
 
 ```powershell
 Set-Location backend
@@ -110,61 +135,79 @@ python -m alembic upgrade head
 python manage.py seed
 ```
 
-### 5. Run the API
+`seed` resets the demo dataset and loads sample customers and historical transactions.
 
-Run this manually because the server is long-lived:
+### 4. Start the API
+
+In a terminal from `backend/`:
 
 ```powershell
-Set-Location backend
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Interactive API docs: <http://localhost:8000/docs>
+The API is available at <http://localhost:8000>, with interactive OpenAPI documentation at <http://localhost:8000/docs>.
 
-> Recovery mutation endpoints are intentionally unauthenticated for the local
-> hackathon demo. Bind the API to localhost and do not expose it publicly until
-> authentication and authorization are added.
+### 5. Install and run the frontend
 
-### 6. Run the tests
-
-```powershell
-Set-Location backend
-python -m pytest -v
-```
-
-41 tests cover seeding, payment simulation, deterministic risk, strict agent
-outputs, bounded live-provider tool calls, provider fallback, read-tool scoping,
-concurrent decision idempotency, recommendation execution, policy blocks,
-contact cooldown, durable scheduling, retry verification, audit safety, and
-recovered-revenue accounting. They use temporary SQLite and need no API key.
-
-### 7. Frontend
-
-Install and configure the public API origin:
+In a separate terminal:
 
 ```powershell
 Set-Location frontend
 Copy-Item .env.local.example .env.local
 npm install
-```
-
-Run the Next.js development server manually because it is long-lived:
-
-```powershell
-Set-Location frontend
 npm run dev
 ```
 
-Open <http://localhost:3000>. The UI includes live database-backed KPIs,
-filterable recovery cases, full case workflow controls, a payment simulator,
-customers, and agent activity. FastAPI must be running on port 8000 unless
-`NEXT_PUBLIC_API_BASE_URL` is changed.
+Open <http://localhost:3000>. The default frontend configuration expects the API at `http://localhost:8000`.
 
----
+## Optional: PostgreSQL with Docker
 
-## Try the complete backend flow
+The Compose file runs PostgreSQL only; the backend and frontend continue to run directly on your machine.
 
-Create a failed payment (all amounts are paise):
+```powershell
+docker compose up -d
+docker compose exec postgres pg_isready -U revenue -d revenuerecover
+```
+
+Use the PostgreSQL `DATABASE_URL` already shown in `.env.example`, then run the migration and seed commands from the quick-start section.
+
+To stop the database:
+
+```powershell
+docker compose down
+```
+
+## Demo workflow
+
+1. Seed the sample data with `python manage.py seed`.
+2. Open the dashboard and create a failed payment in the payment simulator.
+3. A recovery case is automatically created and given a deterministic risk score.
+4. Open that case and run the recovery agent. `AI_PROVIDER=rules` works without an API key.
+5. Execute the validated recommendation.
+6. Simulate the follow-up customer payment and inspect the case audit trail.
+
+Amounts in API requests and persisted records are integer **paise**. For example, `299900` represents ₹2,999.00.
+
+## API overview
+
+All application routes are under `/api` unless noted otherwise.
+
+| Area | Endpoints |
+|---|---|
+| Health | `GET /health` |
+| Dashboard | `GET /api/dashboard` |
+| Customers | `GET`, `POST /api/customers`; `GET /api/customers/{customer_id}` |
+| Transactions | `GET /api/transactions`; `GET /api/transactions/{transaction_id}` |
+| Payment simulation | `POST /api/payments/simulate` |
+| Recovery cases | `GET /api/recovery-cases`; `GET /api/recovery-cases/{case_id}` |
+| Agent and actions | `POST /api/recovery-cases/{case_id}/run-agent`; `POST /api/recovery-cases/{case_id}/execute` |
+| Recovery verification | `POST /api/recovery-cases/{case_id}/simulate-payment` |
+| Audit activity | `GET /api/agent/actions` |
+| Demo controls | `POST /api/demo/seed`; `POST /api/demo/reset`; `DELETE /api/demo/data` |
+
+### API example
+
+Create a failed payment for an existing seeded customer:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/payments/simulate `
@@ -172,25 +215,16 @@ curl.exe -X POST http://localhost:8000/api/payments/simulate `
   -d '{"customer_id":1,"amount":299900,"succeed":false,"failure_reason":"expired_card"}'
 ```
 
-Run the structured agent for the returned recovery-case ID:
+Then run the agent and execute its persisted recommendation for the returned case ID:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/recovery-cases/1/run-agent
-```
-
-The agent can call only four case-scoped read tools. It returns a strict
-five-field decision; the backend persists DIAGNOSED and DECIDED audit steps but
-does not perform the proposed side effect.
-
-Execute the persisted recommendation through the authoritative policy guard:
-
-```powershell
 curl.exe -X POST http://localhost:8000/api/recovery-cases/1/execute `
   -H "Content-Type: application/json" `
   -d '{}'
 ```
 
-Simulate the customer completing payment:
+Finally, simulate a successful customer payment:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/api/recovery-cases/1/simulate-payment `
@@ -198,47 +232,46 @@ curl.exe -X POST http://localhost:8000/api/recovery-cases/1/simulate-payment `
   -d '{"succeed":true}'
 ```
 
-Inspect final state and the chronological audit trail:
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | SQLite or PostgreSQL SQLAlchemy connection URL |
+| `AI_PROVIDER` | `anthropic`, `xai`/`grok`, or `rules` |
+| `ANTHROPIC_API_KEY` | Secret key for the Anthropic provider; keep only in `.env` |
+| `XAI_API_KEY` | Secret key for the xAI provider; keep only in `.env` |
+| `AGENT_MODEL` | Optional provider-model override |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL; configured in `frontend/.env.local` |
+| `MAX_PAYMENT_RETRIES` | Backend retry limit |
+| `MAX_REMINDERS` | Backend reminder limit |
+| `CONTACT_COOLDOWN_HOURS` | Minimum interval between contact actions |
+
+See [`.env.example`](.env.example) for the complete local configuration template.
+
+## Validation and tests
+
+Run backend tests from `backend/`:
 
 ```powershell
-curl.exe http://localhost:8000/api/recovery-cases/1
+python -m pytest -v
 ```
 
-High-value cases, exhausted retry/reminder budgets, premature scheduled retries,
-contact-cooldown violations, mismatched recommendations, repeated failed
-actions, and terminal cases are blocked and logged rather than silently run.
+Run frontend checks from `frontend/`:
 
----
+```powershell
+npm run lint
+npm run typecheck
+npm run build
+```
 
-## AI and safety boundaries
+## Development notes
 
-- **Strict decisions.** Diagnosis, confidence, one controlled action, public
-  reason, and escalation flag are schema-validated without scalar coercion.
-- **Read-only investigation.** Providers see only case-scoped customer traits,
-  the failed transaction, bounded payment history, and payment status. Contact
-  addresses and writable sessions are not exposed to the model.
-- **Backend-owned public text.** Provider prose is never persisted; concise
-  explanations are generated from validated diagnosis/action enums.
-- **Visible fallback.** Responses and audits identify the effective provider,
-  configured provider, model, tool calls, and fallback reason.
-- **AI proposes; backend disposes.** Every recommendation still passes retry,
-  reminder, cooldown, amount, LTV, retryability, schedule, and terminal checks.
-- **Concurrent safety.** A compare-and-set claim and SQLite contention retries
-  ensure concurrent agent runs persist exactly one decision and audit sequence.
+- The frontend renders API state and does not calculate risk, money, or recovery eligibility.
+- Risk scoring is deterministic and explainable; it is not represented as ML-based scoring.
+- The `rules` provider is the recommended default for repeatable offline demos.
+- The API is designed for local demonstration and does not include authentication or authorization. Do not expose it publicly with real credentials or customer data.
 
-## Conventions
+## Further documentation
 
-- Money is integer paise; responses include Indian-grouped display strings.
-- Risk is deterministic, labelled rule-based, and its factors sum to the score.
-- Business logic, state transitions, money, and eligibility live in the backend.
-- Every detection, score, diagnosis, decision, approval, block, execution,
-  escalation, failure, and verified recovery creates a real audit record.
-
----
-
-## Next steps
-
-Phase 5 will add database-backed analytics visualizations, complete final visual
-polish and accessibility review, and package the end-to-end workflow into a
-rehearsed two-minute buildathon demo. No chart will be added until its metrics
-are defined and computed by the backend.
+See [docs/PRD.md](docs/PRD.md) for the project requirements, workflow rationale, and planned scope.
